@@ -14,6 +14,7 @@ import androidx.lifecycle.ViewModelProvider
 import app.horizon.launcher.ui.HomeScreen
 import app.horizon.launcher.ui.HomeViewModel
 import app.horizon.launcher.ui.Motion
+import app.horizon.launcher.ui.Sounds
 
 class MainActivity : ComponentActivity() {
 
@@ -28,6 +29,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         vm = ViewModelProvider(this)[HomeViewModel::class.java]
+        Sounds.init(applicationContext)
 
         val filter = IntentFilter().apply {
             addAction(Intent.ACTION_PACKAGE_ADDED)
@@ -38,6 +40,9 @@ class MainActivity : ComponentActivity() {
         ContextCompat.registerReceiver(this, packageReceiver, filter, ContextCompat.RECEIVER_EXPORTED)
 
         setContent { HomeScreen(vm) }
+        // the home screen always paints every pixel itself: skip the window background (one less full-screen fill per frame)
+        window.setBackgroundDrawable(null)
+        if (savedInstanceState == null) handle(intent, fresh = true)
     }
 
     override fun onResume() {
@@ -51,10 +56,18 @@ class MainActivity : ComponentActivity() {
         if (hasFocus) vm.requestRestore()
     }
 
-    /** Home pressed while the launcher is already in front. */
+    /** Home pressed (system or Home key service) while Smart-TV is already running. */
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        vm.goHome()
+        handle(intent, fresh = false)
+    }
+
+    private fun handle(intent: Intent?, fresh: Boolean) {
+        when (intent?.action) {
+            ACTION_CONTROL_CENTER -> vm.toggleControlCenter()
+            ACTION_SWITCHER -> vm.toggleSwitcher()
+            else -> if (!fresh) vm.goHome()
+        }
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
@@ -63,10 +76,16 @@ class MainActivity : ComponentActivity() {
             // which keys does the remote send? visible with: adb logcat -s SmartTV
             Log.d(HomeViewModel.TAG, "key ${KeyEvent.keyCodeToString(event.keyCode)} repeat=${event.repeatCount}")
         }
-        // blue key opens / closes the Control Center
-        if (event.keyCode == KeyEvent.KEYCODE_PROG_BLUE) {
-            if (event.action == KeyEvent.ACTION_UP) vm.toggleControlCenter()
-            return true
+        when (event.keyCode) {
+            // blue: Control Center, yellow: recently used apps
+            KeyEvent.KEYCODE_PROG_BLUE -> {
+                if (event.action == KeyEvent.ACTION_UP) vm.toggleControlCenter()
+                return true
+            }
+            KeyEvent.KEYCODE_PROG_YELLOW -> {
+                if (event.action == KeyEvent.ACTION_UP) vm.toggleSwitcher()
+                return true
+            }
         }
         return super.dispatchKeyEvent(event)
     }
@@ -74,5 +93,11 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         unregisterReceiver(packageReceiver)
         super.onDestroy()
+    }
+
+    companion object {
+        const val ACTION_HOME = "app.horizon.launcher.HOME"
+        const val ACTION_CONTROL_CENTER = "app.horizon.launcher.CONTROL_CENTER"
+        const val ACTION_SWITCHER = "app.horizon.launcher.SWITCHER"
     }
 }

@@ -15,7 +15,7 @@ import kotlinx.coroutines.withContext
 const val SETTINGS_ID = "__settings"
 
 /** One launchable app, with bitmaps pre-rendered off the main thread. */
-data class AppEntry(
+class AppEntry(
     val pkg: String,
     val label: String,
     val launch: Intent,
@@ -25,8 +25,8 @@ data class AppEntry(
     val icon: ImageBitmap?,
     /** Average colour of the artwork, used for fallback tiles and backgrounds. */
     val accent: Color,
-    /** Original banner drawable, rendered at higher resolution for the hero background. */
-    internal val source: Drawable?,
+    /** Original drawable (banner or icon), rendered bigger on demand, e.g. for the App Switcher. */
+    val source: Drawable?,
 )
 
 class AppRepository(private val context: Context) {
@@ -63,8 +63,9 @@ class AppRepository(private val context: Context) {
     }
 
     private fun build(pkg: String, label: String, launch: Intent, bannerD: Drawable?, iconD: Drawable?): AppEntry {
-        val banner = bannerD?.let { render(it, 256, 144) }
-        val icon = if (banner == null) iconD?.let { render(it, 128, 128) } else null
+        // 320x180 px: sharp at the focused (1.1x) tile size on a 1080p TV
+        val banner = bannerD?.let { renderDrawable(it, 320, 180) }
+        val icon = if (banner == null) iconD?.let { renderDrawable(it, 144, 144) } else null
         val src = banner ?: icon
         val accent = src?.let { averageColor(it) } ?: Color(0xFF2A2F45)
         return AppEntry(
@@ -74,11 +75,9 @@ class AppRepository(private val context: Context) {
             banner = banner?.asImageBitmap(),
             icon = icon?.asImageBitmap(),
             accent = accent,
-            source = if (banner != null) bannerD else null,
+            source = bannerD ?: iconD,
         )
     }
-
-    private fun render(d: Drawable, w: Int, h: Int): Bitmap = renderDrawable(d, w, h)
 
     private fun averageColor(b: Bitmap): Color {
         val px = Bitmap.createScaledBitmap(b, 1, 1, true).getPixel(0, 0)
@@ -94,45 +93,6 @@ class AppRepository(private val context: Context) {
             copy.setBounds(0, 0, w, h)
             copy.draw(Canvas(b))
             return b
-        }
-
-        /** Hero background: banner at 480x270, lightly blurred. */
-        fun backdropFrom(d: Drawable): ImageBitmap = blurred(renderDrawable(d, 480, 270), radius = 2, passes = 2)
-
-        /**
-         * Light blur for the hero background: the art stays recognisable, just soft.
-         * Two passes of a small box blur on the 256x144 banner (≈ gaussian), done on the CPU
-         * because Android 11 has no RenderEffect. The upscale to full screen adds extra softness.
-         */
-        fun blurred(src: Bitmap, radius: Int = 1, passes: Int = 2): ImageBitmap {
-            val w = src.width
-            val h = src.height
-            val a = IntArray(w * h)
-            val b = IntArray(w * h)
-            src.getPixels(a, 0, w, 0, 0, w, h)
-            repeat(passes) {
-                boxBlur(a, b, w, h, radius, horizontal = true)
-                boxBlur(b, a, w, h, radius, horizontal = false)
-            }
-            return Bitmap.createBitmap(a, w, h, Bitmap.Config.ARGB_8888).asImageBitmap()
-        }
-
-        private fun boxBlur(src: IntArray, dst: IntArray, w: Int, h: Int, r: Int, horizontal: Boolean) {
-            val outer = if (horizontal) h else w
-            val inner = if (horizontal) w else h
-            for (o in 0 until outer) {
-                for (i in 0 until inner) {
-                    var sa = 0; var sr = 0; var sg = 0; var sb = 0; var n = 0
-                    for (k in -r..r) {
-                        val j = (i + k).coerceIn(0, inner - 1)
-                        val p = if (horizontal) src[o * w + j] else src[j * w + o]
-                        sa += p ushr 24; sr += (p shr 16) and 0xFF; sg += (p shr 8) and 0xFF; sb += p and 0xFF
-                        n++
-                    }
-                    val idx = if (horizontal) o * w + i else i * w + o
-                    dst[idx] = ((sa / n) shl 24) or ((sr / n) shl 16) or ((sg / n) shl 8) or (sb / n)
-                }
-            }
         }
     }
 }

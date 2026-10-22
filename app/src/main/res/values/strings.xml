@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Smart-TV</string>
+    <string name="home_key_name">Smart-TV Home-Taste</string>
+    <string name="home_key_description">Home-Taste: kurz drücken = Smart-TV, zweimal = zuletzt benutzte Apps, halten = Control Center. Liest keine Bildschirminhalte.</string>
+    <string name="dream_name">Smart-TV Bildschirmschoner</string>
 </resources>
