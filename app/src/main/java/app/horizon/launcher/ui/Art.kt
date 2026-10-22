@@ -57,10 +57,15 @@ object Art {
             boxBlur(a, b, w, h, 4, horizontal = true)
             boxBlur(b, a, w, h, 4, horizontal = false)
         }
-        val out = Bitmap.createBitmap(a, w, h, Bitmap.Config.ARGB_8888)
-        val c = Canvas(out)
-        c.drawColor(0x26000000) // keeps white labels readable on bright photos
-        return out.asImageBitmap()
+        // darken ~15 % so white labels stay readable on bright photos
+        for (i in a.indices) {
+            val p = a[i]
+            val r = ((p shr 16) and 0xFF) * 85 / 100
+            val g = ((p shr 8) and 0xFF) * 85 / 100
+            val bl = (p and 0xFF) * 85 / 100
+            a[i] = (0xFF shl 24) or (r shl 16) or (g shl 8) or bl
+        }
+        return Bitmap.createBitmap(a, w, h, Bitmap.Config.ARGB_8888).asImageBitmap()
     }
 
     private fun boxBlur(src: IntArray, dst: IntArray, w: Int, h: Int, r: Int, horizontal: Boolean) {

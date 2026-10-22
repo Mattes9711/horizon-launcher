@@ -14,7 +14,18 @@ jobs:
           distribution: temurin
           java-version: '17'
       - name: Build
-        run: chmod +x gradlew && ./gradlew --no-daemon assembleRelease
+        run: |
+          chmod +x gradlew
+          set +e
+          ./gradlew --no-daemon assembleRelease 2>&1 | tee build.log
+          rc=${PIPESTATUS[0]}
+          if [ $rc -ne 0 ]; then
+            # surface compiler / lint errors as annotations (readable via the API)
+            grep -E "^e: |error:|Error:|What went wrong" -A3 build.log | grep -v '^--$' | head -40 | while IFS= read -r l; do
+              echo "::error::${l//%/%25}"
+            done
+          fi
+          exit $rc
       - uses: actions/upload-artifact@v4
         with:
           name: horizon-apk

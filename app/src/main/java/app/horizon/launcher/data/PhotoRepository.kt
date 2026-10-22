@@ -23,7 +23,7 @@ class PhotoRepository(private val context: Context) {
     private val stampFile = File(bingDir, ".last")
 
     fun list(includeBing: Boolean): List<Photo> {
-        val own = buildList {
+        val own = buildList<File> {
             context.getExternalFilesDir("photos")?.listFiles()?.filter { it.isImage() }?.sortedBy { it.name }?.let { addAll(it) }
             context.getExternalFilesDir(null)?.listFiles { f -> f.name.startsWith("wallpaper.") && f.isImage() }?.let { addAll(it) }
         }.map { Photo(it, captionFor(it)) }
