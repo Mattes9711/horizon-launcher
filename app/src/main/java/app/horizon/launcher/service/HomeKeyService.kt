@@ -1,7 +1,10 @@
 package app.horizon.launcher.service
 
 import android.accessibilityservice.AccessibilityService
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -25,6 +28,15 @@ class HomeKeyService : AccessibilityService() {
     private var longFired = false
     private var pendingSingle: Runnable? = null
 
+    private val airPlay by lazy { AirPlayKeeper(this) { open(MainActivity.ACTION_HOME) } }
+
+    /** TV switched on (from standby): make sure the AirPlay receiver is reachable again. */
+    private val screenOn = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            handler.postDelayed({ airPlay.check() }, 8000)
+        }
+    }
+
     private val longPress = Runnable {
         longFired = true
         open(MainActivity.ACTION_CONTROL_CENTER)
@@ -36,6 +48,8 @@ class HomeKeyService : AccessibilityService() {
         Log.d(TAG, "home key service connected")
         // right after boot: show Smart-TV instead of the stock launcher
         if (SystemClock.elapsedRealtime() < 5 * 60 * 1000L) open(MainActivity.ACTION_HOME)
+        registerReceiver(screenOn, IntentFilter(Intent.ACTION_SCREEN_ON))
+        handler.postDelayed({ airPlay.check() }, 20_000)
     }
 
     override fun onKeyEvent(event: KeyEvent): Boolean {
@@ -80,6 +94,8 @@ class HomeKeyService : AccessibilityService() {
     override fun onInterrupt() = Unit
 
     override fun onDestroy() {
+        runCatching { unregisterReceiver(screenOn) }
+        airPlay.stop()
         if (instance === this) instance = null
         handler.removeCallbacksAndMessages(null)
         super.onDestroy()

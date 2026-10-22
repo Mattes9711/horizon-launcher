@@ -62,7 +62,7 @@ import app.horizon.launcher.service.HomeKeyService
 import kotlinx.coroutines.delay
 import java.util.Date
 
-private val PanelWidth = 420.dp
+private val PanelWidth = 300.dp
 const val AIRPLAY_PKG = "io.github.jqssun.airplay"
 private val Ink = Color(0xFF111318)
 
@@ -90,17 +90,17 @@ fun ControlCenter(vm: HomeViewModel, hiddenCount: Int, onClose: () -> Unit) {
         Column(
             Modifier
                 .align(Alignment.TopEnd)
-                .padding(top = 22.dp, end = 26.dp)
+                .padding(top = 21.dp, end = 24.dp)
                 .width(PanelWidth)
                 .graphicsLayer {
                     translationY = -slide.value * with(density) { 60.dp.toPx() }
                     translationX = slide.value * with(density) { 40.dp.toPx() }
                 }
-                .clip(RoundedCornerShape(30.dp))
-                .background(Color(0xEB1B1D23))
-                .border(1.dp, Color.White.copy(alpha = 0.09f), RoundedCornerShape(30.dp))
+                .clip(RoundedCornerShape(23.dp))
+                .background(Color(0xE0181A20))
+                .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(23.dp))
                 .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(9.dp),
         ) {
             Header()
             VolumeRow()
@@ -109,15 +109,7 @@ fun ControlCenter(vm: HomeViewModel, hiddenCount: Int, onClose: () -> Unit) {
                     onClose()
                     if (!HomeKeyService.sleep()) startScreensaver(context)
                 }
-                CcButton(Glyph.AIRPLAY, "AirPlay", Modifier.weight(1f)) {
-                    val i = context.packageManager.getLeanbackLaunchIntentForPackage(AIRPLAY_PKG)
-                        ?: context.packageManager.getLaunchIntentForPackage(AIRPLAY_PKG)
-                    if (i != null) {
-                        onClose(); open(context, i)
-                    } else {
-                        Toast.makeText(context, "AirPlay einmal am PC installieren: ./tv.sh airplay", Toast.LENGTH_LONG).show()
-                    }
-                }
+                CcButton(Glyph.AIRPLAY, "AirPlay", Modifier.weight(1f)) { vm.openAirPlay() }
                 CcButton(Glyph.MOON, "Nicht stören", Modifier.weight(1f), active = dnd) {
                     if (nm.isNotificationPolicyAccessGranted) {
                         nm.setInterruptionFilter(
@@ -133,14 +125,14 @@ fun ControlCenter(vm: HomeViewModel, hiddenCount: Int, onClose: () -> Unit) {
                 CcButton(Glyph.INPUT, "Quelle", Modifier.weight(1f)) {
                     onClose(); openLiveTv(context)
                 }
-                CcButton(Glyph.WIFI, if (online) "WLAN\nverbunden" else "WLAN\noffline", Modifier.weight(1f)) {
+                CcButton(Glyph.WIFI, if (online) "WLAN" else "Offline", Modifier.weight(1f)) {
                     onClose(); open(context, Intent(Settings.ACTION_WIFI_SETTINGS))
                 }
                 CcButton(Glyph.NOTE, "Klicktöne", Modifier.weight(1f), active = sounds) { vm.setSounds(!sounds) }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                CcButton(Glyph.PHOTO, "Foto des\nTages", Modifier.weight(1f), active = bing) { vm.setBing(!bing) }
-                CcButton(Glyph.EYE, if (hiddenCount > 0) "Weitere Apps\n($hiddenCount)" else "Weitere\nApps", Modifier.weight(1f)) {
+                CcButton(Glyph.PHOTO, "Fotos", Modifier.weight(1f), active = bing) { vm.setBing(!bing) }
+                CcButton(Glyph.CARDS, "Weitere Apps", Modifier.weight(1f)) {
                     vm.closeControlCenter(); vm.toggleDrawer()
                 }
                 CcButton(Glyph.GEAR, "Einstellungen", Modifier.weight(1f)) {
@@ -153,22 +145,10 @@ fun ControlCenter(vm: HomeViewModel, hiddenCount: Int, onClose: () -> Unit) {
 
 @Composable
 private fun Header() {
-    val context = LocalContext.current
-    val timeFormat = remember { DateFormat.getTimeFormat(context) }
-    val dateFormat = remember { DateFormat.getLongDateFormat(context) }
-    var now by remember { mutableStateOf(Date()) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            now = Date(); delay(10_000)
-        }
-    }
-    Row(Modifier.fillMaxWidth().padding(start = 6.dp, end = 4.dp, top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Txt(timeFormat.format(now), size = 34.sp, weight = FontWeight.SemiBold, letterSpacing = (-0.5).sp)
-            Txt(dateFormat.format(now), size = 13.sp, color = Color.White.copy(alpha = 0.65f))
-        }
-        Avatar(40.dp)
-    }
+    Txt(
+        rememberClock(), size = 33.sp, weight = FontWeight.Light, letterSpacing = (-0.8).sp,
+        modifier = Modifier.padding(start = 3.dp, top = 1.dp, bottom = 4.dp),
+    )
 }
 
 @Composable
@@ -194,8 +174,8 @@ private fun VolumeRow() {
     Row(
         Modifier
             .fillMaxWidth()
-            .height(54.dp)
-            .clip(RoundedCornerShape(18.dp))
+            .height(40.dp)
+            .clip(RoundedCornerShape(14.dp))
             .background(if (focused) Color.White else Color.White.copy(alpha = 0.08f))
             .focusRequester(requester)
             .onFocusChanged { focused = it.isFocused }
@@ -217,19 +197,19 @@ private fun VolumeRow() {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         val ink = if (focused) Ink else Color.White
-        GlyphIcon(Glyph.SPEAKER, ink, 22.dp)
+        GlyphIcon(Glyph.SPEAKER, ink, 17.dp)
         Spacer(Modifier.width(12.dp))
         Box(
             Modifier
                 .weight(1f)
-                .height(8.dp)
-                .clip(RoundedCornerShape(4.dp))
+                .height(5.dp)
+                .clip(RoundedCornerShape(3.dp))
                 .background(ink.copy(alpha = 0.18f))
         ) {
             Box(Modifier.fillMaxHeight().fillMaxWidth(fill.coerceIn(0f, 1f)).background(ink))
         }
         Spacer(Modifier.width(12.dp))
-        Txt(if (muted) "stumm" else "${volume * 100 / max}%", size = 13.sp, weight = FontWeight.SemiBold, color = ink, modifier = Modifier.width(44.dp), align = TextAlign.End)
+        Txt(if (muted) "stumm" else "${volume * 100 / max}", size = 11.sp, weight = FontWeight.Medium, color = ink, modifier = Modifier.width(34.dp), align = TextAlign.End)
     }
 }
 
@@ -240,15 +220,15 @@ private fun CcButton(glyph: Glyph, label: String, modifier: Modifier, active: Bo
     val scale by animateFloatAsState(if (focused) 1.06f else 1f, spring(dampingRatio = 0.7f, stiffness = 600f), label = "ccScale")
     val bg = when {
         focused -> Color.White
-        active -> Color(0xFF3B82F6)
+        active -> Color.White.copy(alpha = 0.24f)
         else -> Color.White.copy(alpha = 0.08f)
     }
     val ink = if (focused) Ink else Color.White
     Column(
         modifier
-            .height(92.dp)
+            .height(66.dp)
             .graphicsLayer { scaleX = scale; scaleY = scale }
-            .clip(RoundedCornerShape(20.dp))
+            .clip(RoundedCornerShape(15.dp))
             .background(bg)
             .onFocusChanged {
                 if (it.isFocused && !focused) Sounds.tick()
@@ -263,11 +243,11 @@ private fun CcButton(glyph: Glyph, label: String, modifier: Modifier, active: Bo
                 true
             }
             .focusable()
-            .padding(12.dp),
+            .padding(11.dp),
         verticalArrangement = Arrangement.SpaceBetween,
     ) {
-        GlyphIcon(glyph, if (active && !focused) Color.White else ink, 24.dp)
-        Txt(label, size = 11.sp, weight = FontWeight.SemiBold, color = ink, maxLines = 2)
+        GlyphIcon(glyph, ink, 17.dp)
+        Txt(label, size = 10.sp, weight = FontWeight.Medium, color = ink)
     }
 }
 

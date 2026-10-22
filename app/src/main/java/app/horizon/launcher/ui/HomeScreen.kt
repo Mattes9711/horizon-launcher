@@ -104,6 +104,7 @@ fun HomeScreen(vm: HomeViewModel) {
     val switcher by vm.switcher.collectAsStateWithLifecycle()
     val editing by vm.editing.collectAsStateWithLifecycle()
     val drawerOpen by vm.drawer.collectAsStateWithLifecycle()
+    val airplay by vm.airplay.collectAsStateWithLifecycle()
 
     var menuFor by remember { mutableStateOf<AppEntry?>(null) }
     // focus requests: every tile checks whether it is the target when the counter changes
@@ -114,7 +115,7 @@ fun HomeScreen(vm: HomeViewModel) {
         focusTick++
     }
 
-    val tilesEnabled = !immersive && menuFor == null && !controlCenter && switcher == null && !drawerOpen
+    val tilesEnabled = !immersive && menuFor == null && !controlCenter && switcher == null && !drawerOpen && !airplay
     val heroSpace = LocalConfiguration.current.screenHeightDp.dp - DockHeight - RowPeek
 
     // Page position, animated from a coroutine: changing rows never recomposes the grid.
@@ -195,13 +196,13 @@ fun HomeScreen(vm: HomeViewModel) {
             Spacer(Modifier.height(120.dp))
         }
 
-        TopShelfHint(vm, immersive)
-        StatusPill(Modifier.align(Alignment.TopEnd).padding(top = 28.dp, end = 40.dp))
+        TopClock(vm, immersive)
         if (editing != null) EditHint(Modifier.align(Alignment.BottomCenter).padding(bottom = 22.dp))
 
         if (immersive) {
             ImmersiveLayer(vm, onExit = { vm.setImmersive(false) })
         }
+        if (airplay) AirPlayScreen(onClose = { vm.closeAirPlay() })
         if (controlCenter) {
             ControlCenter(vm, hiddenCount = state.hiddenCount, onClose = { vm.closeControlCenter() })
         }
@@ -340,12 +341,12 @@ private fun TileWithFocus(
 private fun Dock(vm: HomeViewModel, content: @Composable () -> Unit) {
     val row by vm.focusRow.collectAsStateWithLifecycle()
     val light = row != DOCK_ROW
-    val shape = RoundedCornerShape(30.dp)
+    val shape = RoundedCornerShape(26.dp)
     val fill by animateColorAsState(
-        if (light) Color.White.copy(alpha = 0.42f) else Color(0xFF16181D).copy(alpha = 0.40f), tween(300), label = "dockFill"
+        if (light) Color.White.copy(alpha = 0.16f) else Color(0xFF12141A).copy(alpha = 0.26f), tween(300), label = "dockFill"
     )
     val edge by animateColorAsState(
-        if (light) Color.White.copy(alpha = 0.6f) else Color.White.copy(alpha = 0.08f), tween(300), label = "dockEdge"
+        if (light) Color.White.copy(alpha = 0.22f) else Color.White.copy(alpha = 0.10f), tween(300), label = "dockEdge"
     )
     Box(
         Modifier
@@ -434,12 +435,6 @@ private fun HeroLayer(vm: HomeViewModel) {
                 )
         )
     }
-    // title fades out in photo mode (full screen), like CleanFrame: only photo, time and caption
-    val titleAlpha by animateFloatAsState(if (immersive) 0f else 1f, tween(250), label = "title")
-    Column(Modifier.padding(start = 56.dp, top = 40.dp, end = 300.dp).graphicsLayer { alpha = titleAlpha }) {
-        Txt(h.app.label, size = 54.sp, weight = FontWeight.ExtraBold, shadow = SoftShadow, letterSpacing = (-1).sp)
-        current?.caption?.let { Txt(it, size = 18.sp, weight = FontWeight.Medium, shadow = SoftShadow, maxLines = 2) }
-    }
     if (h.slides.size > 1) {
         PageDots(
             count = h.slides.size, index = slide,
@@ -495,27 +490,30 @@ private fun EditHint(modifier: Modifier) {
     }
 }
 
+/**
+ * The only text on screen: a large light clock top-left on the photo, a small one top-right over the apps.
+ * Hidden in photo mode, which shows its own.
+ */
 @Composable
-private fun StatusPill(modifier: Modifier) {
-    val context = LocalContext.current
-    val format = remember { DateFormat.getTimeFormat(context) }
-    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            now = System.currentTimeMillis()
-            delay(10_000)
+private fun TopClock(vm: HomeViewModel, immersive: Boolean) {
+    val row by vm.focusRow.collectAsStateWithLifecycle()
+    val onShelf = row == DOCK_ROW
+    val big by animateFloatAsState(if (onShelf && !immersive) 1f else 0f, tween(260), label = "bigClock")
+    val small by animateFloatAsState(if (!onShelf && !immersive) 1f else 0f, tween(260), label = "smallClock")
+    val time = rememberClock()
+    Box(Modifier.fillMaxSize()) {
+        if (big > 0f) {
+            Txt(
+                time, size = 48.sp, weight = FontWeight.Light, letterSpacing = (-1.2).sp, shadow = SoftShadow,
+                modifier = Modifier.padding(start = 48.dp, top = 30.dp).graphicsLayer { alpha = big },
+            )
         }
-    }
-    Row(
-        modifier = modifier
-            .clip(RoundedCornerShape(50))
-            .background(Color.Black.copy(alpha = 0.30f))
-            .padding(start = 14.dp, end = 5.dp, top = 5.dp, bottom = 5.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Txt(format.format(Date(now)), size = 14.sp, weight = FontWeight.SemiBold)
-        Spacer(Modifier.width(10.dp))
-        Avatar(26.dp)
+        if (small > 0f) {
+            Txt(
+                time, size = 15.sp, weight = FontWeight.Normal, shadow = SoftShadow,
+                modifier = Modifier.align(Alignment.TopEnd).padding(top = 24.dp, end = 42.dp).graphicsLayer { alpha = small },
+            )
+        }
     }
 }
 
@@ -576,30 +574,14 @@ private fun flip(vm: HomeViewModel, delta: Int) {
     if ((vm.hero.value?.slides?.size ?: 0) > 1) vm.nextSlide(delta) else vm.nextPhoto(delta)
 }
 
-/** Photo mode: big quiet clock and the photo caption. */
+/** Photo mode: nothing but the photo and a large, light clock. */
 @Composable
-private fun PhotoModeOverlay(vm: HomeViewModel) {
-    val context = LocalContext.current
-    val photo by vm.photo.collectAsStateWithLifecycle()
-    val hero by vm.hero.collectAsStateWithLifecycle()
-    val slide by vm.slide.collectAsStateWithLifecycle()
-    val format = remember { DateFormat.getTimeFormat(context) }
-    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            now = System.currentTimeMillis(); delay(10_000)
-        }
-    }
-    val caption = hero?.slides?.getOrNull(slide)?.caption ?: photo?.caption
-    Box(Modifier.fillMaxSize().padding(start = 56.dp, end = 56.dp, bottom = 40.dp)) {
-        Column(Modifier.align(Alignment.BottomStart).padding(end = 340.dp)) {
-            caption?.let { Txt(it, size = 15.sp, weight = FontWeight.Medium, shadow = SoftShadow, maxLines = 2) }
-            Spacer(Modifier.height(6.dp))
-            Txt("OK öffnen  ·  ◀ ▶ nächstes Bild  ·  ▼ zurück", size = 12.sp, color = Color.White.copy(alpha = 0.6f), shadow = SoftShadow)
-        }
+private fun PhotoModeOverlay(@Suppress("UNUSED_PARAMETER") vm: HomeViewModel) {
+    val time = rememberClock()
+    Box(Modifier.fillMaxSize().padding(end = 54.dp, bottom = 34.dp)) {
         Txt(
-            format.format(Date(now)), size = 64.sp, weight = FontWeight.SemiBold, shadow = SoftShadow,
-            letterSpacing = (-1.5).sp, modifier = Modifier.align(Alignment.BottomEnd),
+            time, size = 78.sp, weight = FontWeight.Light, shadow = SoftShadow,
+            letterSpacing = (-2.2).sp, modifier = Modifier.align(Alignment.BottomEnd),
         )
     }
 }

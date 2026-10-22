@@ -74,6 +74,21 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     private var hiddenNow: Set<String> = emptySet()
     private var pinnedNow: Set<String> = emptySet()
 
+    private val _airplay = MutableStateFlow(false)
+    val airplay: StateFlow<Boolean> = _airplay.asStateFlow()
+
+    fun openAirPlay() {
+        _controlCenter.value = false
+        _airplay.value = true
+    }
+
+    fun closeAirPlay() {
+        if (_airplay.value) {
+            _airplay.value = false
+            _restoreTick.value++
+        }
+    }
+
     private val _drawer = MutableStateFlow(false)
     val drawer: StateFlow<Boolean> = _drawer.asStateFlow()
 
@@ -279,6 +294,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         _switcher.value = null
         _editing.value = null
         _drawer.value = false
+        _airplay.value = false
         lastFocusedPkg = null
         _homeTick.value++
     }
