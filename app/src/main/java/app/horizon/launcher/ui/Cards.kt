@@ -38,6 +38,30 @@ import app.horizon.launcher.data.AppEntry
 
 enum class Label { NONE, FOCUSED, ALWAYS }
 
+/** Own artwork for system apps whose banners look out of place (no third-party logos). */
+class Special(val glyph: Glyph, val title: String, val top: Color, val bottom: Color)
+
+fun specialArt(pkg: String): Special? = when (pkg) {
+    AIRPLAY_PKG -> Special(Glyph.AIRPLAY, "AirPlay", Color(0xFF3B4A6B), Color(0xFF1B2133))
+    "com.mediatek.wwtv.tvcenter", app.horizon.launcher.data.LIVE_TV_ID ->
+        Special(Glyph.LIVE, "Live-TV", Color(0xFF4A3A33), Color(0xFF1F1A18))
+    else -> null
+}
+
+@Composable
+private fun SpecialArt(s: Special, height: Dp) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(androidx.compose.ui.graphics.Brush.linearGradient(listOf(s.top, s.bottom))),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(height * 0.07f, Alignment.CenterVertically),
+    ) {
+        GlyphIcon(s.glyph, Color.White, height * 0.33f)
+        if (height > 90.dp) Txt(s.title, size = 16.sp, weight = FontWeight.SemiBold, letterSpacing = (-0.2).sp)
+    }
+}
+
 private val CardSpring = spring<Float>(dampingRatio = 0.75f, stiffness = 600f)
 
 /**
@@ -99,7 +123,9 @@ fun AppCard(
             contentAlignment = Alignment.Center,
         ) {
             val img = art
+            val special = specialArt(app.pkg)
             when {
+                special != null -> SpecialArt(special, height)
                 img != null -> Image(img, app.label, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
                 app.icon != null -> Image(app.icon, app.label, modifier = Modifier.size(height * 0.5f))
                 else -> Txt(app.label, size = 13.sp, weight = FontWeight.SemiBold, align = TextAlign.Center, maxLines = 2)
@@ -155,7 +181,7 @@ fun InputCard(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterVertically),
         ) {
-            GlyphIcon(if (input.pkg == app.horizon.launcher.data.LIVE_TV_ID) Glyph.INPUT else Glyph.HDMI, ink, if (height > 100.dp) 40.dp else 26.dp)
+            GlyphIcon(if (input.pkg == app.horizon.launcher.data.LIVE_TV_ID) Glyph.LIVE else Glyph.HDMI, ink, if (height > 100.dp) 40.dp else 26.dp)
             Txt(input.label, size = if (height > 100.dp) 18.sp else 13.sp, weight = FontWeight.Bold, color = ink)
         }
         if (caption != null) {

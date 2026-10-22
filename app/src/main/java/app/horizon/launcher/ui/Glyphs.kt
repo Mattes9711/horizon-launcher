@@ -16,7 +16,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /** Simple line icons drawn in code (no icon fonts or third-party artwork). */
-enum class Glyph { POWER, MOON, SPEAKER, SPARKLE, INPUT, WIFI, GEAR, EYE, CARDS, NOTE, AIRPLAY, PHOTO, HOME, GRID, HDMI }
+enum class Glyph { POWER, MOON, SPEAKER, SPARKLE, INPUT, WIFI, GEAR, EYE, CARDS, NOTE, AIRPLAY, PHOTO, HOME, GRID, HDMI, LIVE }
 
 @Composable
 fun GlyphIcon(glyph: Glyph, color: Color, size: Dp = 26.dp) {
@@ -88,14 +88,30 @@ private fun DrawScope.draw(g: Glyph, c: Color) {
             drawRoundRect(c, Offset(w * 0.24f, w * 0.2f), Size(w * 0.52f, w * 0.6f), androidx.compose.ui.geometry.CornerRadius(w * 0.07f))
         }
         Glyph.AIRPLAY -> {
-            // screen outline open at the bottom, with a triangle rising into it
-            val r = androidx.compose.ui.geometry.CornerRadius(w * 0.08f)
-            drawRoundRect(c, Offset(w * 0.08f, w * 0.12f), Size(w * 0.84f, w * 0.56f), r, style = s)
-            val tri = androidx.compose.ui.graphics.Path().apply {
-                moveTo(w * 0.5f, w * 0.5f); lineTo(w * 0.74f, w * 0.9f); lineTo(w * 0.26f, w * 0.9f); close()
+            // screen mirroring: rounded screen, open at the bottom, a solid triangle rising into it
+            val frame = androidx.compose.ui.graphics.Path().apply {
+                moveTo(w * 0.29f, w * 0.74f); lineTo(w * 0.2f, w * 0.74f)
+                quadraticBezierTo(w * 0.12f, w * 0.74f, w * 0.12f, w * 0.66f)
+                lineTo(w * 0.12f, w * 0.25f)
+                quadraticBezierTo(w * 0.12f, w * 0.17f, w * 0.2f, w * 0.17f)
+                lineTo(w * 0.8f, w * 0.17f)
+                quadraticBezierTo(w * 0.88f, w * 0.17f, w * 0.88f, w * 0.25f)
+                lineTo(w * 0.88f, w * 0.66f)
+                quadraticBezierTo(w * 0.88f, w * 0.74f, w * 0.8f, w * 0.74f)
+                lineTo(w * 0.71f, w * 0.74f)
             }
-            drawRect(Color.Transparent, Offset(w * 0.24f, w * 0.6f), Size(w * 0.52f, w * 0.16f), blendMode = androidx.compose.ui.graphics.BlendMode.Clear)
+            drawPath(frame, c, style = Stroke(width = s.width, cap = StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
+            val tri = androidx.compose.ui.graphics.Path().apply {
+                moveTo(w * 0.5f, w * 0.58f); lineTo(w * 0.69f, w * 0.85f); lineTo(w * 0.31f, w * 0.85f); close()
+            }
             drawPath(tri, c)
+        }
+        Glyph.LIVE -> {
+            // TV with antenna
+            val r = androidx.compose.ui.geometry.CornerRadius(w * 0.08f)
+            drawRoundRect(c, Offset(w * 0.12f, w * 0.3f), Size(w * 0.76f, w * 0.52f), r, style = s)
+            drawLine(c, Offset(w * 0.36f, w * 0.1f), Offset(w * 0.5f, w * 0.27f), s.width, StrokeCap.Round)
+            drawLine(c, Offset(w * 0.64f, w * 0.1f), Offset(w * 0.5f, w * 0.27f), s.width, StrokeCap.Round)
         }
         Glyph.PHOTO -> {
             val r = androidx.compose.ui.geometry.CornerRadius(w * 0.08f)

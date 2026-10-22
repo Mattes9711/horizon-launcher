@@ -40,6 +40,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -171,11 +172,12 @@ private fun HomePage(vm: HomeViewModel, state: HomeState, openMenu: (AppEntry, L
             Txt(rememberClock(), size = 57.sp, weight = FontWeight.Light, letterSpacing = (-1.9).sp)
         }
 
-        Txt("Zuletzt", size = 15.sp, weight = FontWeight.SemiBold, modifier = Modifier.padding(start = ContentStart, top = 264.dp))
+        Txt("Zuletzt", size = 15.sp, weight = FontWeight.SemiBold, modifier = Modifier.padding(start = ContentStart, top = 255.dp))
+        // rows are clipped at the sidebar edge: nothing slides underneath it
         LazyRow(
-            contentPadding = PaddingValues(start = ContentStart, end = 48.dp),
+            contentPadding = PaddingValues(start = 14.dp, end = 48.dp, top = 12.dp, bottom = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(21.dp),
-            modifier = Modifier.padding(top = 292.dp).fillMaxWidth(),
+            modifier = Modifier.padding(start = ContentStart - 14.dp, top = 268.dp).fillMaxWidth().height(200.dp).clipToBounds(),
         ) {
             items(recents, key = { "r:" + it.pkg }) { app ->
                 AppCard(
@@ -193,10 +195,11 @@ private fun HomePage(vm: HomeViewModel, state: HomeState, openMenu: (AppEntry, L
             }
         }
 
+        Txt("Apps", size = 15.sp, weight = FontWeight.SemiBold, modifier = Modifier.padding(start = ContentStart, top = 471.dp))
         LazyRow(
-            contentPadding = PaddingValues(start = ContentStart, end = 48.dp),
+            contentPadding = PaddingValues(start = 14.dp, end = 48.dp, top = 12.dp, bottom = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(15.dp),
-            modifier = Modifier.padding(top = 484.dp).fillMaxWidth(),
+            modifier = Modifier.padding(start = ContentStart - 14.dp, top = 484.dp).fillMaxWidth().height(140.dp).clipToBounds(),
         ) {
             items(state.favorites, key = { "f:" + it.pkg }) { app ->
                 val idx = state.favorites.indexOf(app)

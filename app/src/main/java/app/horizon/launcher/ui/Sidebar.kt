@@ -52,7 +52,7 @@ private class NavItem(val screen: Screen, val glyph: Glyph, val label: String)
 private val Items = listOf(
     NavItem(Screen.HOME, Glyph.HOME, "Start"),
     NavItem(Screen.APPS, Glyph.GRID, "Alle Apps"),
-    NavItem(Screen.INPUTS, Glyph.INPUT, "Eingänge"),
+    NavItem(Screen.INPUTS, Glyph.LIVE, "Eingänge"),
     NavItem(Screen.AIRPLAY, Glyph.AIRPLAY, "AirPlay"),
     NavItem(Screen.PHOTO, Glyph.PHOTO, "Fotos"),
 )

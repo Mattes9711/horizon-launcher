@@ -32,12 +32,13 @@ object Art {
 
     /**
      * The calm "not really a picture" home background: dusk colours at the top,
-     * fading into near-black where the cards sit. 384x216 px, ~330 KB, stretched full screen.
+     * fading into near-black where the cards sit.
      */
     fun homeGradient(): Bitmap {
-        val w = 384
-        val h = 216
-        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        // 1280x720 in RGB_565 with dithering: crisp shapes on the TV, ~1.8 MB, still a single draw
+        val w = 1280
+        val h = 720
+        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.RGB_565)
         val c = Canvas(bmp)
         val p = Paint(Paint.ANTI_ALIAS_FLAG or Paint.DITHER_FLAG)
         c.drawColor(INK)
