@@ -288,7 +288,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun goHome() {
-        if (photoList.size > 1) showPhoto(photoIndex + 1)
+        // (no photo change here: decoding a new photo right when Home is pressed costs a visible stutter)
         _immersive.value = false
         _controlCenter.value = false
         _switcher.value = null

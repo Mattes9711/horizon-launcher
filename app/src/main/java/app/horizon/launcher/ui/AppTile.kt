@@ -115,7 +115,6 @@ fun AppTile(
     val lift by animateFloatAsState(if (focused) 1f else 0f, tween(180), label = "lift")
     val tiltX = remember { Animatable(0f) }
     val tiltY = remember { Animatable(0f) }
-    val sheen = remember { Animatable(2f) }
 
     // edit mode: the tile wiggles like on the big-screen home screens
     val wiggle = if (editing) {
@@ -129,9 +128,8 @@ fun AppTile(
     LaunchedEffect(focused) {
         if (focused) {
             val tiltSpring = spring<Float>(dampingRatio = 0.45f, stiffness = 110f)
-            launch { tiltY.snapTo(Motion.dx * 7f); tiltY.animateTo(0f, tiltSpring) }
-            launch { tiltX.snapTo(-Motion.dy * 7f); tiltX.animateTo(0f, tiltSpring) }
-            launch { sheen.snapTo(-0.6f); sheen.animateTo(1.6f, tween(650, easing = FastOutSlowInEasing)) }
+            launch { tiltY.snapTo(Motion.dx * 5f); tiltY.animateTo(0f, tiltSpring) }
+            launch { tiltX.snapTo(-Motion.dy * 5f); tiltX.animateTo(0f, tiltSpring) }
         }
     }
 
@@ -149,7 +147,7 @@ fun AppTile(
                     rotationY = tiltY.value
                     rotationZ = wiggle?.value ?: 0f
                     cameraDistance = 14f * density
-                    shadowElevation = lift * 14.dp.toPx()
+                    shadowElevation = lift * 8.dp.toPx()
                     shape = TileShape
                     clip = true
                 }
@@ -201,17 +199,6 @@ fun AppTile(
                 .drawWithContent {
                     drawContent()
                     if (dim > 0f) drawRect(Color.Black.copy(alpha = dim))
-                    val s = sheen.value
-                    if (s > -0.6f && s < 1.6f) {
-                        val x = size.width * s
-                        drawRect(
-                            Brush.linearGradient(
-                                listOf(Color.Transparent, Color.White.copy(alpha = 0.20f), Color.Transparent),
-                                start = Offset(x - size.width * 0.35f, 0f),
-                                end = Offset(x + size.width * 0.15f, size.height),
-                            )
-                        )
-                    }
                 },
             contentAlignment = Alignment.Center,
         ) {
