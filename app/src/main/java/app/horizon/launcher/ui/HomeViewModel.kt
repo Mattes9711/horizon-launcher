@@ -17,6 +17,9 @@ import app.horizon.launcher.data.SETTINGS_ID
 import app.horizon.launcher.data.SavedLayout
 import app.horizon.launcher.data.ShelfRepository
 import app.horizon.launcher.data.ShelfSlide
+import app.horizon.launcher.data.Photo
+import app.horizon.launcher.data.PhotoRepository
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -37,7 +40,10 @@ data class HomeState(
 )
 
 /** Top Shelf content for the focused top-row app. Slides with image == null use generated art. */
-data class Hero(val app: AppEntry, val slides: List<ShelfSlide>, val art: ImageBitmap)
+data class Hero(val app: AppEntry, val slides: List<ShelfSlide>, val art: ImageBitmap, val artIsPhoto: Boolean)
+
+/** Current background photograph: sharp for the Top Shelf, frosted for behind the grid. */
+data class PhotoArt(val sharp: ImageBitmap, val frosted: ImageBitmap, val caption: String?)
 
 data class SwitcherState(
     val apps: List<Pair<AppEntry, ImageBitmap?>> = emptyList(),
@@ -54,6 +60,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = AppRepository(app)
     private val store = LayoutStore(app)
     private val shelf = ShelfRepository(app)
+    private val photos = PhotoRepository(app)
     private val recents = RecentApps(app)
     private val apps = MutableStateFlow<List<AppEntry>?>(null)
 
@@ -86,8 +93,15 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     private val _slide = MutableStateFlow(0)
     val slide: StateFlow<Int> = _slide.asStateFlow()
 
-    private val _wallpaper = MutableStateFlow<ImageBitmap?>(null)
-    val wallpaper: StateFlow<ImageBitmap?> = _wallpaper.asStateFlow()
+    private val _photo = MutableStateFlow<PhotoArt?>(null)
+    val photo: StateFlow<PhotoArt?> = _photo.asStateFlow()
+
+    private val _bing = MutableStateFlow(true)
+    val bing: StateFlow<Boolean> = _bing.asStateFlow()
+
+    private var photoList: List<Photo> = emptyList()
+    private var photoIndex = 0
+    private var photoJob: Job? = null
 
     private val slideCache = LruCache<String, List<ShelfSlide>>(4)
     private val artCache = LruCache<String, ImageBitmap>(10)
@@ -115,18 +129,30 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             store.sounds.collect { _sounds.value = it; Sounds.enabled = it }
         }
         viewModelScope.launch {
+            store.bing.collect { on ->
+                _bing.value = on
+                refreshPhotos(fetch = true)
+            }
+        }
+        // a new photo every 15 minutes, like CleanFrame
+        viewModelScope.launch {
+            while (true) {
+                delay(15 * 60 * 1000L)
+                showPhoto(photoIndex + 1)
+            }
+        }
+        viewModelScope.launch {
             topRowApp.collectLatest { app ->
                 if (app == null) return@collectLatest
                 delay(70) // don't swap artwork while the user scrolls fast
-                val art = artCache.get(app.pkg) ?: withContext(Dispatchers.Default) { Art.aurora(app.accent) }
-                    .also { artCache.put(app.pkg, it) }
+                val (art, isPhoto) = heroArt(app)
                 val cached = slideCache.get(app.pkg)
                 _slide.value = 0
-                _hero.value = Hero(app, cached.orEmpty(), art)
+                _hero.value = Hero(app, cached.orEmpty(), art, isPhoto)
                 if (cached == null) {
                     val slides = withContext(Dispatchers.IO) { shelf.load(app.pkg) }
                     slideCache.put(app.pkg, slides)
-                    if (topRowApp.value?.pkg == app.pkg) _hero.value = Hero(app, slides, art)
+                    if (topRowApp.value?.pkg == app.pkg) _hero.value = Hero(app, slides, art, isPhoto)
                 }
             }
         }
@@ -140,21 +166,68 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Called on every resume: picks up wallpaper / hero images pushed with tv.sh. */
+    /** Called on every resume: picks up photos / hero images pushed with tv.sh and new photos of the day. */
     fun refreshImages() {
         viewModelScope.launch(Dispatchers.IO) {
-            val dir = getApplication<Application>().getExternalFilesDir(null) ?: return@launch
-            val stamp = dir.walkTopDown().filter { it.isFile }.joinToString { "${it.name}:${it.lastModified()}" }
-            if (stamp == imageStamp) return@launch
-            imageStamp = stamp
-            slideCache.evictAll()
-            _wallpaper.value = ShelfRepository.decodeWallpaper(getApplication())
-            val app = topRowApp.value ?: return@launch
-            val slides = shelf.load(app.pkg)
-            slideCache.put(app.pkg, slides)
-            _hero.value?.let { _hero.value = it.copy(slides = slides) }
+            val dir = getApplication<Application>().getExternalFilesDir(null)
+            val stamp = dir?.walkTopDown()?.filter { it.isFile }?.joinToString { "${it.name}:${it.lastModified()}" }.orEmpty()
+            if (stamp != imageStamp) {
+                imageStamp = stamp
+                slideCache.evictAll()
+                refreshPhotos(fetch = false)
+                val app = topRowApp.value
+                if (app != null) {
+                    val slides = shelf.load(app.pkg)
+                    slideCache.put(app.pkg, slides)
+                    _hero.value?.let { _hero.value = it.copy(slides = slides) }
+                }
+            }
+            refreshPhotos(fetch = true)
         }
     }
+
+    fun setBing(on: Boolean) {
+        viewModelScope.launch { store.setBing(on) }
+    }
+
+    /** Photo or (no photos yet / offline) the app-coloured generated art. */
+    private suspend fun heroArt(app: AppEntry): Pair<ImageBitmap, Boolean> {
+        _photo.value?.let { return it.sharp to true }
+        val art = artCache.get(app.pkg) ?: withContext(Dispatchers.Default) { Art.aurora(app.accent) }
+            .also { artCache.put(app.pkg, it) }
+        return art to false
+    }
+
+    private suspend fun refreshPhotos(fetch: Boolean) = withContext(Dispatchers.IO) {
+        val bingOn = _bing.value
+        if (fetch && bingOn && !photos.refreshBing() && photoList.isNotEmpty()) return@withContext
+        val list = photos.list(bingOn)
+        if (list.map { it.file.path } == photoList.map { it.file.path } && _photo.value != null) return@withContext
+        photoList = list
+        if (list.isEmpty()) {
+            _photo.value = null
+            topRowApp.value?.let { app -> _hero.value?.let { _hero.value = it.copy(art = heroArt(app).first, artIsPhoto = false) } }
+        } else {
+            showPhoto(0)
+        }
+    }
+
+    private fun showPhoto(index: Int) {
+        val list = photoList
+        if (list.isEmpty()) return
+        photoJob?.cancel()
+        photoJob = viewModelScope.launch(Dispatchers.Default) {
+            val i = ((index % list.size) + list.size) % list.size
+            val p = list[i]
+            val bmp = PhotoRepository.decode(p.file, 1280) ?: return@launch
+            val art = PhotoArt(bmp.asImageBitmap(), Art.frosted(bmp), p.caption)
+            photoIndex = i
+            _photo.value = art
+            _hero.value?.let { _hero.value = it.copy(art = art.sharp, artIsPhoto = true) }
+        }
+    }
+
+    fun nextPhoto(delta: Int) = showPhoto(photoIndex + delta)
 
     fun onFocus(app: AppEntry, row: Int) {
         lastFocusedPkg = app.pkg
@@ -177,6 +250,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun goHome() {
+        if (photoList.size > 1) showPhoto(photoIndex + 1)
         _immersive.value = false
         _controlCenter.value = false
         _switcher.value = null

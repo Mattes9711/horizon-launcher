@@ -42,6 +42,45 @@ object Art {
         return bmp
     }
 
+    /**
+     * Frosted-glass version of a photo for behind the app grid: small, strongly blurred, slightly darkened.
+     * Done once per photo on the CPU (Android 11 has no live blur), then simply stretched full screen.
+     */
+    fun frosted(src: Bitmap): ImageBitmap {
+        val w = 192
+        val h = 108
+        val small = Bitmap.createScaledBitmap(src, w, h, true)
+        val a = IntArray(w * h)
+        val b = IntArray(w * h)
+        small.getPixels(a, 0, w, 0, 0, w, h)
+        repeat(3) {
+            boxBlur(a, b, w, h, 4, horizontal = true)
+            boxBlur(b, a, w, h, 4, horizontal = false)
+        }
+        val out = Bitmap.createBitmap(a, w, h, Bitmap.Config.ARGB_8888)
+        val c = Canvas(out)
+        c.drawColor(0x26000000) // keeps white labels readable on bright photos
+        return out.asImageBitmap()
+    }
+
+    private fun boxBlur(src: IntArray, dst: IntArray, w: Int, h: Int, r: Int, horizontal: Boolean) {
+        val outer = if (horizontal) h else w
+        val inner = if (horizontal) w else h
+        for (o in 0 until outer) {
+            for (i in 0 until inner) {
+                var sr = 0; var sg = 0; var sb = 0; var n = 0
+                for (k in -r..r) {
+                    val j = (i + k).coerceIn(0, inner - 1)
+                    val p = if (horizontal) src[o * w + j] else src[j * w + o]
+                    sr += (p shr 16) and 0xFF; sg += (p shr 8) and 0xFF; sb += p and 0xFF
+                    n++
+                }
+                val idx = if (horizontal) o * w + i else i * w + o
+                dst[idx] = (0xFF shl 24) or ((sr / n) shl 16) or ((sg / n) shl 8) or (sb / n)
+            }
+        }
+    }
+
     /** Original "aurora" artwork in an app's own colours. */
     fun aurora(accent: Color, seed: Int = 0): ImageBitmap {
         val p = palette(accent)

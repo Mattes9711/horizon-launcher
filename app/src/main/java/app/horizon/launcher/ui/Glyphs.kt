@@ -16,7 +16,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /** Simple line icons drawn in code (no icon fonts or third-party artwork). */
-enum class Glyph { POWER, MOON, SPEAKER, SPARKLE, INPUT, WIFI, GEAR, EYE, CARDS, NOTE }
+enum class Glyph { POWER, MOON, SPEAKER, SPARKLE, INPUT, WIFI, GEAR, EYE, CARDS, NOTE, AIRPLAY, PHOTO }
 
 @Composable
 fun GlyphIcon(glyph: Glyph, color: Color, size: Dp = 26.dp) {
@@ -86,6 +86,26 @@ private fun DrawScope.draw(g: Glyph, c: Color) {
             drawRoundRect(c, Offset(w * 0.04f, w * 0.3f), Size(w * 0.26f, w * 0.4f), androidx.compose.ui.geometry.CornerRadius(w * 0.05f), alpha = 0.5f)
             drawRoundRect(c, Offset(w * 0.7f, w * 0.3f), Size(w * 0.26f, w * 0.4f), androidx.compose.ui.geometry.CornerRadius(w * 0.05f), alpha = 0.5f)
             drawRoundRect(c, Offset(w * 0.24f, w * 0.2f), Size(w * 0.52f, w * 0.6f), androidx.compose.ui.geometry.CornerRadius(w * 0.07f))
+        }
+        Glyph.AIRPLAY -> {
+            // screen outline open at the bottom, with a triangle rising into it
+            val r = androidx.compose.ui.geometry.CornerRadius(w * 0.08f)
+            drawRoundRect(c, Offset(w * 0.08f, w * 0.12f), Size(w * 0.84f, w * 0.56f), r, style = s)
+            val tri = androidx.compose.ui.graphics.Path().apply {
+                moveTo(w * 0.5f, w * 0.5f); lineTo(w * 0.74f, w * 0.9f); lineTo(w * 0.26f, w * 0.9f); close()
+            }
+            drawRect(Color.Transparent, Offset(w * 0.24f, w * 0.6f), Size(w * 0.52f, w * 0.16f), blendMode = androidx.compose.ui.graphics.BlendMode.Clear)
+            drawPath(tri, c)
+        }
+        Glyph.PHOTO -> {
+            val r = androidx.compose.ui.geometry.CornerRadius(w * 0.08f)
+            drawRoundRect(c, Offset(w * 0.08f, w * 0.18f), Size(w * 0.84f, w * 0.64f), r, style = s)
+            val hill = androidx.compose.ui.graphics.Path().apply {
+                moveTo(w * 0.16f, w * 0.76f); lineTo(w * 0.4f, w * 0.46f); lineTo(w * 0.56f, w * 0.64f)
+                lineTo(w * 0.66f, w * 0.54f); lineTo(w * 0.84f, w * 0.76f); close()
+            }
+            drawPath(hill, c)
+            drawCircle(c, w * 0.07f, Offset(w * 0.7f, w * 0.34f))
         }
         Glyph.NOTE -> {
             drawCircle(c, w * 0.13f, Offset(w * 0.3f, w * 0.74f))

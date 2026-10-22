@@ -21,6 +21,7 @@ class LayoutStore(private val context: Context) {
     private val orderKey = stringPreferencesKey("order")
     private val hiddenKey = stringPreferencesKey("hidden")
     private val soundsKey = booleanPreferencesKey("sounds")
+    private val bingKey = booleanPreferencesKey("bing")
 
     val layout: Flow<SavedLayout> = context.layoutDataStore.data.map { p ->
         SavedLayout(
@@ -32,6 +33,9 @@ class LayoutStore(private val context: Context) {
 
     val sounds: Flow<Boolean> = context.layoutDataStore.data.map { it[soundsKey] ?: true }
 
+    /** Bing photo of the day as background (only network use of the launcher). */
+    val bing: Flow<Boolean> = context.layoutDataStore.data.map { it[bingKey] ?: true }
+
     suspend fun save(favorites: List<String>, order: List<String>) {
         context.layoutDataStore.edit {
             it[favKey] = favorites.joinToString(",")
@@ -41,6 +45,10 @@ class LayoutStore(private val context: Context) {
 
     suspend fun setHidden(hidden: Set<String>) {
         context.layoutDataStore.edit { it[hiddenKey] = hidden.joinToString(",") }
+    }
+
+    suspend fun setBing(on: Boolean) {
+        context.layoutDataStore.edit { it[bingKey] = on }
     }
 
     suspend fun setSounds(on: Boolean) {

@@ -73,6 +73,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.horizon.launcher.data.AppEntry
+import app.horizon.launcher.data.INPUT_PREFIX
 import app.horizon.launcher.data.SETTINGS_ID
 import kotlinx.coroutines.delay
 import java.util.Date
@@ -211,8 +212,10 @@ fun HomeScreen(vm: HomeViewModel) {
                         add("Bewegen" to { vm.startEdit(app.pkg) })
                         add((if (isFav) "Aus oberer Reihe entfernen" else "In obere Reihe") to { vm.toggleFavorite(app.pkg) })
                         add("Ausblenden" to { vm.hide(app.pkg) })
-                        add("Deinstallieren" to { uninstall(context, app.pkg) })
-                        add("App-Info" to { openAppInfo(context, app.pkg) })
+                        if (!app.pkg.startsWith(INPUT_PREFIX)) {
+                            add("Deinstallieren" to { uninstall(context, app.pkg) })
+                            add("App-Info" to { openAppInfo(context, app.pkg) })
+                        }
                     } else {
                         add("Öffnen" to { launch(context, app) })
                     }
@@ -301,18 +304,26 @@ private fun Backdrop(vm: HomeViewModel) {
     }
 }
 
+/** Behind the grid: the current photo, frosted (blurred + slightly darkened), or a calm pastel. */
 @Composable
 private fun WallpaperLayer(vm: HomeViewModel) {
-    val wallpaper by vm.wallpaper.collectAsStateWithLifecycle()
-    val pastel = remember { Art.pastelWallpaper() }
-    Image(
-        bitmap = wallpaper ?: pastel,
-        contentDescription = null,
-        contentScale = ContentScale.Crop,
-        // slight darkening so white labels stay readable, without an extra layer
-        colorFilter = ColorFilter.tint(Color.Black.copy(alpha = 0.10f), BlendMode.SrcAtop),
-        modifier = Modifier.fillMaxSize(),
-    )
+    val photo by vm.photo.collectAsStateWithLifecycle()
+    val frosted = photo?.frosted
+    if (frosted != null) {
+        Crossfade(targetState = frosted, animationSpec = tween(500), label = "frosted") { img ->
+            Image(img, null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+        }
+    } else {
+        val pastel = remember { Art.pastelWallpaper() }
+        Image(
+            bitmap = pastel,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            // slight darkening so white labels stay readable, without an extra layer
+            colorFilter = ColorFilter.tint(Color.Black.copy(alpha = 0.10f), BlendMode.SrcAtop),
+            modifier = Modifier.fillMaxSize(),
+        )
+    }
 }
 
 @Composable
@@ -331,7 +342,7 @@ private fun HeroLayer(vm: HomeViewModel) {
     }
 
     val current = h.slides.getOrNull(slide)
-    Crossfade(targetState = current?.image ?: h.art, animationSpec = tween(320), label = "hero") { img ->
+    Crossfade(targetState = current?.image ?: h.art, animationSpec = tween(450), label = "hero") { img ->
         Image(
             bitmap = img,
             contentDescription = null,
@@ -339,8 +350,8 @@ private fun HeroLayer(vm: HomeViewModel) {
             modifier = Modifier.fillMaxSize(),
         )
     }
-    if (current?.image != null) {
-        // own / app images get the shade the generated art has baked in
+    if (current?.image != null || h.artIsPhoto) {
+        // photos get the shade the generated art has baked in
         Box(
             Modifier
                 .fillMaxSize()
@@ -352,7 +363,9 @@ private fun HeroLayer(vm: HomeViewModel) {
                 )
         )
     }
-    Column(Modifier.padding(start = 56.dp, top = 40.dp, end = 300.dp)) {
+    // title fades out in photo mode (full screen), like CleanFrame: only photo, time and caption
+    val titleAlpha by animateFloatAsState(if (immersive) 0f else 1f, tween(250), label = "title")
+    Column(Modifier.padding(start = 56.dp, top = 40.dp, end = 300.dp).graphicsLayer { alpha = titleAlpha }) {
         Txt(h.app.label, size = 54.sp, weight = FontWeight.ExtraBold, shadow = SoftShadow, letterSpacing = (-1).sp)
         current?.caption?.let { Txt(it, size = 18.sp, weight = FontWeight.Medium, shadow = SoftShadow, maxLines = 2) }
     }
@@ -465,8 +478,8 @@ private fun ImmersiveLayer(vm: HomeViewModel, onExit: () -> Unit) {
                 if (e.type != KeyEventType.KeyUp) return@onKeyEvent !passThrough
                 when {
                     e.key == Key.DirectionDown -> { onExit(); true }
-                    e.key == Key.DirectionLeft -> { vm.nextSlide(-1); true }
-                    e.key == Key.DirectionRight -> { vm.nextSlide(1); true }
+                    e.key == Key.DirectionLeft -> { flip(vm, -1); true }
+                    e.key == Key.DirectionRight -> { flip(vm, 1); true }
                     e.key.isOk() -> {
                         val h = vm.hero.value
                         val target = h?.slides?.getOrNull(vm.slide.value)?.intent
@@ -483,10 +496,39 @@ private fun ImmersiveLayer(vm: HomeViewModel, onExit: () -> Unit) {
             }
             .focusable()
     ) {
+        PhotoModeOverlay(vm)
+    }
+}
+
+/** Left/Right in full screen: the app's own pages if it has several, otherwise the next photo. */
+private fun flip(vm: HomeViewModel, delta: Int) {
+    if ((vm.hero.value?.slides?.size ?: 0) > 1) vm.nextSlide(delta) else vm.nextPhoto(delta)
+}
+
+/** Photo mode: big quiet clock and the photo caption. */
+@Composable
+private fun PhotoModeOverlay(vm: HomeViewModel) {
+    val context = LocalContext.current
+    val photo by vm.photo.collectAsStateWithLifecycle()
+    val hero by vm.hero.collectAsStateWithLifecycle()
+    val slide by vm.slide.collectAsStateWithLifecycle()
+    val format = remember { DateFormat.getTimeFormat(context) }
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            now = System.currentTimeMillis(); delay(10_000)
+        }
+    }
+    val caption = hero?.slides?.getOrNull(slide)?.caption ?: photo?.caption
+    Box(Modifier.fillMaxSize().padding(start = 56.dp, end = 56.dp, bottom = 40.dp)) {
+        Column(Modifier.align(Alignment.BottomStart).padding(end = 340.dp)) {
+            caption?.let { Txt(it, size = 15.sp, weight = FontWeight.Medium, shadow = SoftShadow, maxLines = 2) }
+            Spacer(Modifier.height(6.dp))
+            Txt("OK öffnen  ·  ◀ ▶ nächstes Bild  ·  ▼ zurück", size = 12.sp, color = Color.White.copy(alpha = 0.6f), shadow = SoftShadow)
+        }
         Txt(
-            "OK öffnen   ·   ◀ ▶ blättern   ·   ▼ zurück",
-            size = 13.sp, color = Color.White.copy(alpha = 0.75f), shadow = SoftShadow,
-            modifier = Modifier.align(Alignment.BottomStart).padding(start = 56.dp, bottom = 30.dp),
+            format.format(Date(now)), size = 64.sp, weight = FontWeight.SemiBold, shadow = SoftShadow,
+            letterSpacing = (-1.5).sp, modifier = Modifier.align(Alignment.BottomEnd),
         )
     }
 }

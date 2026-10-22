@@ -63,6 +63,7 @@ import kotlinx.coroutines.delay
 import java.util.Date
 
 private val PanelWidth = 420.dp
+const val AIRPLAY_PKG = "io.github.jqssun.airplay"
 private val Ink = Color(0xFF111318)
 
 /** Control Center: panel in the top-right corner (long-press Home or blue key). Back closes it. */
@@ -75,6 +76,7 @@ fun ControlCenter(vm: HomeViewModel, hiddenCount: Int, onClose: () -> Unit) {
     BackHandler { onClose() }
 
     val sounds by vm.sounds.collectAsStateWithLifecycle()
+    val bing by vm.bing.collectAsStateWithLifecycle()
     val nm = remember { context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager }
     var dnd by remember { mutableStateOf(nm.currentInterruptionFilter > NotificationManager.INTERRUPTION_FILTER_ALL) }
     val online = remember { isOnline(context) }
@@ -107,6 +109,15 @@ fun ControlCenter(vm: HomeViewModel, hiddenCount: Int, onClose: () -> Unit) {
                     onClose()
                     if (!HomeKeyService.sleep()) startScreensaver(context)
                 }
+                CcButton(Glyph.AIRPLAY, "AirPlay", Modifier.weight(1f)) {
+                    val i = context.packageManager.getLeanbackLaunchIntentForPackage(AIRPLAY_PKG)
+                        ?: context.packageManager.getLaunchIntentForPackage(AIRPLAY_PKG)
+                    if (i != null) {
+                        onClose(); open(context, i)
+                    } else {
+                        Toast.makeText(context, "AirPlay einmal am PC installieren: ./tv.sh airplay", Toast.LENGTH_LONG).show()
+                    }
+                }
                 CcButton(Glyph.MOON, "Nicht stören", Modifier.weight(1f), active = dnd) {
                     if (nm.isNotificationPolicyAccessGranted) {
                         nm.setInterruptionFilter(
@@ -117,12 +128,8 @@ fun ControlCenter(vm: HomeViewModel, hiddenCount: Int, onClose: () -> Unit) {
                         Toast.makeText(context, "Einmal am PC ./tv.sh einrichten ausführen", Toast.LENGTH_LONG).show()
                     }
                 }
-                CcButton(Glyph.NOTE, "Klicktöne", Modifier.weight(1f), active = sounds) { vm.setSounds(!sounds) }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                CcButton(Glyph.SPARKLE, "Bildschirm-\nschoner", Modifier.weight(1f)) {
-                    onClose(); startScreensaver(context)
-                }
                 CcButton(Glyph.INPUT, "Quelle", Modifier.weight(1f)) {
                     onClose(); openLiveTv(context)
                 }
@@ -130,8 +137,10 @@ fun ControlCenter(vm: HomeViewModel, hiddenCount: Int, onClose: () -> Unit) {
                     onClose(); open(context, Intent(Settings.ACTION_WIFI_SETTINGS))
                 }
             }
+                CcButton(Glyph.NOTE, "Klicktöne", Modifier.weight(1f), active = sounds) { vm.setSounds(!sounds) }
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                CcButton(Glyph.CARDS, "Zuletzt\nbenutzt", Modifier.weight(1f)) { vm.toggleSwitcher() }
+                CcButton(Glyph.PHOTO, "Foto des\nTages", Modifier.weight(1f), active = bing) { vm.setBing(!bing) }
                 CcButton(Glyph.EYE, if (hiddenCount > 0) "$hiddenCount Apps\neinblenden" else "Keine aus-\ngeblendet", Modifier.weight(1f)) {
                     vm.unhideAll()
                 }

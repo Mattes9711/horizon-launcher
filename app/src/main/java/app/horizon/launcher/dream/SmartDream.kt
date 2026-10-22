@@ -34,9 +34,14 @@ class SmartDream : DreamService() {
 
 private class DreamView(context: Context) : View(context) {
 
-    private val photos: List<File> = context.getExternalFilesDir("screensaver")
-        ?.listFiles { f -> f.isFile && f.extension.lowercase() in setOf("jpg", "jpeg", "png", "webp") }
-        ?.toList()?.shuffled().orEmpty()
+    // own screensaver photos first, else own background photos, else the photos of the day
+    private val photos: List<File> = listOf(
+        context.getExternalFilesDir("screensaver"),
+        context.getExternalFilesDir("photos"),
+        File(context.filesDir, "bing"),
+    ).map { dir ->
+        dir?.listFiles { f -> f.isFile && f.extension.lowercase() in setOf("jpg", "jpeg", "png", "webp") }?.toList().orEmpty()
+    }.firstOrNull { it.isNotEmpty() }.orEmpty().shuffled()
 
     private val loader = Executors.newSingleThreadExecutor()
     private val paint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)

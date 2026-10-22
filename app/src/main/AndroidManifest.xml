@@ -29,6 +29,7 @@
             <category android:name="android.intent.category.LAUNCHER" />
         </intent>
         <package android:name="com.mediatek.wwtv.tvcenter" />
+        <package android:name="io.github.jqssun.airplay" />
     </queries>
 
     <application
