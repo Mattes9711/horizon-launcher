@@ -1,32 +1,38 @@
-# Horizon – your own Android TV home screen
+# Smart-TV – a custom Android TV home screen
 
-A big blurred background of the selected app, one row of favourites, all other apps below it, a clock in the top right. No ads, no recommendations, no tracking, and no internet permission.
+Own launcher for my Vestel Android TV 11 (formerly "Horizon"). Kotlin + Jetpack Compose for TV, no ads, no tracking, no internet permission.
+Design language inspired by big-screen home screens (hero background, glass dock, parallax tiles) – original assets only.
 
-**On the remote**
-- Arrows move between tiles, **OK** opens an app.
-- **Hold OK** (or press the Menu key) on a tile to add or remove a favourite, move it left or right, or open App info.
-- **Home** or **Back** jumps back to the first favourite.
+## Remote
+| Key | Action |
+|---|---|
+| Arrows | move between apps |
+| OK | open app |
+| Hold OK or MENU | context menu: move left/right, add/remove from top row, app info |
+| Up on the top row | full-screen background (Down/OK/Back returns) |
+| Home / Back | back to the first app |
 
-## 1. Build the APK in the cloud (GitHub, free, about 5 min)
-1. Open your empty repository `horizon-launcher` on github.com and click **uploading an existing file**.
-2. Drag in **everything inside** this `launcher` folder, including `.github`, `app`, `gradle`, `gradlew` and the other files. Then click **Commit changes**.
-   - If Windows hides `.github`: in File Explorer, go to View → Show → Hidden items.
-3. Go to the **Actions** tab. "Build APK" starts on its own; wait for the green tick (2–4 min).
-4. Click the run, then download **horizon-apk** under *Artifacts*. Unzip it to get `app-release.apk`.
+## Build
+GitHub Actions builds `app-release.apk` on every push (Actions tab → latest run → Artifacts → `horizon-apk`).
 
-(Alternative: open this folder in Android Studio → Build → Build APK(s).)
-
-## 2. Install it on the TV
-Put `app-release.apk` into the `Neuer Ordner` folder, then run:
+## Install on the TV (from the PC folder with `tv.sh`)
 ```
 ./tv.sh install-apk app-release.apk
-./tv.sh set-home
 ```
-`set-home` makes Horizon the preferred home screen and presses Home so you see it. The TV's own launcher stays installed and enabled.
-If the TV keeps showing its own home screen, stop and ask Claude. The next step changes more and needs your OK.
+Every build is signed with `app/horizon.keystore`, so updates keep the layout.
 
-## Undo
-`./tv.sh undo` restores the old home screen and uninstalls Horizon (and reverts the other changes).
+## Revert to the stock launcher
+```
+./tv.sh undo
+```
+or manually: `adb uninstall app.horizon.launcher` (and `adb shell pm enable com.google.android.tvlauncher` if it was disabled).
 
-## Updating
-Change the code, upload it to GitHub again, download the new APK and run `./tv.sh install-apk app-release.apk`. Your favourites are kept because every build is signed with the same key (`app/horizon.keystore`).
+## Roadmap
+1. Home screen core (Compose, grid, glass dock, parallax focus, DataStore) – **current**
+2. Top shelf / hero content
+3. Edit mode and folders
+4. Control Center
+5. App switcher
+6. Screensaver (DreamService)
+7. Settings, search, sounds
+8. AirPlay mirroring (optional)
