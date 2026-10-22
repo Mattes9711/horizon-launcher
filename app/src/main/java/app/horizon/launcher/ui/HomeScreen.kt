@@ -5,16 +5,12 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
-import android.text.format.DateFormat
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.Crossfade
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -29,22 +25,15 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -54,12 +43,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.BlendMode
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ColorFilter
-import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -67,543 +53,457 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.horizon.launcher.data.AppEntry
-import app.horizon.launcher.data.INPUT_PREFIX
+import app.horizon.launcher.data.Kind
+import app.horizon.launcher.data.LIVE_TV_ID
 import app.horizon.launcher.data.SETTINGS_ID
+import app.horizon.launcher.service.HomeKeyService
 import kotlinx.coroutines.delay
+import java.text.SimpleDateFormat
 import java.util.Date
+import java.util.Locale
 
-private val SidePadding = 40.dp
-private val TileGap = 22.dp
+/** Near-black page colour of the design. */
+val InkBg = Color(0xFF0D0F14)
+private val ContentStart = 96.dp
 
-// Fixed geometry, so the page can be positioned exactly (no automatic scrolling that can jump).
-private val DockHeight = 18.dp + TileHeight + TileLabelHeight + 6.dp
-private val RowHeight = 18.dp + TileHeight + TileLabelHeight
-private val RowPeek = 50.dp      // how much of the 2nd row shows below the dock on the Top Shelf
-private val GridTop = 64.dp      // dock position when browsing the grid (below the clock)
-
-private val PageSpring = spring<Float>(dampingRatio = 1f, stiffness = 700f)
+private typealias MenuAction = Pair<String, () -> Unit>
 
 @Composable
 fun HomeScreen(vm: HomeViewModel) {
     val context = LocalContext.current
-    val density = LocalDensity.current
     val state by vm.state.collectAsStateWithLifecycle()
-    val immersive by vm.immersive.collectAsStateWithLifecycle()
-    val homeTick by vm.homeTick.collectAsStateWithLifecycle()
-    val restoreTick by vm.restoreTick.collectAsStateWithLifecycle()
-    val controlCenter by vm.controlCenter.collectAsStateWithLifecycle()
-    val switcher by vm.switcher.collectAsStateWithLifecycle()
-    val editing by vm.editing.collectAsStateWithLifecycle()
+    val screen by vm.screen.collectAsStateWithLifecycle()
     val drawerOpen by vm.drawer.collectAsStateWithLifecycle()
-    val airplay by vm.airplay.collectAsStateWithLifecycle()
-
-    var menuFor by remember { mutableStateOf<AppEntry?>(null) }
-    // focus requests: every tile checks whether it is the target when the counter changes
-    var focusTarget by remember { mutableStateOf<String?>(null) }
-    var focusTick by remember { mutableIntStateOf(0) }
-    fun requestFocusOn(pkg: String?) {
-        focusTarget = pkg ?: (state.favorites.firstOrNull() ?: state.others.firstOrNull())?.pkg
-        focusTick++
+    var menu by remember { mutableStateOf<Pair<AppEntry, List<MenuAction>>?>(null) }
+    fun openMenu(app: AppEntry, actions: List<MenuAction>) {
+        menu = app to actions
     }
 
-    val tilesEnabled = !immersive && menuFor == null && !controlCenter && switcher == null && !drawerOpen && !airplay
-    val heroSpace = LocalConfiguration.current.screenHeightDp.dp - DockHeight - RowPeek
-
-    // Page position, animated from a coroutine: changing rows never recomposes the grid.
-    val scroll = remember { Animatable(0f) }
-    LaunchedEffect(heroSpace) {
-        vm.focusRow.collect { row ->
-            val target = with(density) {
-                when {
-                    row == DOCK_ROW -> 0f
-                    row <= 1 -> (heroSpace - GridTop).toPx()
-                    else -> (heroSpace - GridTop + RowHeight * (row - 1)).toPx()
-                }
+    BackHandler {
+        when {
+            screen == Screen.HOME -> vm.goHome()
+            else -> {
+                vm.show(Screen.HOME); vm.focus(null)
             }
-            scroll.animateTo(target, PageSpring)
         }
-    }
-
-    LaunchedEffect(state.loaded, homeTick) { if (state.loaded) requestFocusOn(null) }
-    LaunchedEffect(restoreTick) { if (state.loaded) requestFocusOn(vm.lastFocusedPkg) }
-    // while moving a tile in edit mode, keep focus on it after every layout change
-    LaunchedEffect(state, editing) { editing?.let { requestFocusOn(it) } }
-
-    BackHandler(enabled = true) {
-        if (editing != null) vm.endEdit() else vm.goHome()
     }
 
     Box(Modifier.fillMaxSize()) {
-        Backdrop(vm)
-
-        val pageAlpha by animateFloatAsState(if (immersive) 0f else 1f, tween(280), label = "pageAlpha")
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .wrapContentHeight(align = Alignment.Top, unbounded = true)
-                .graphicsLayer {
-                    translationY = -scroll.value
-                    alpha = pageAlpha
-                },
-        ) {
-            Spacer(Modifier.height(heroSpace))
-
-            Dock(vm) {
-                LazyRow(
-                    contentPadding = PaddingValues(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(TileGap),
-                ) {
-                    items(state.favorites, key = { it.pkg }) { app ->
-                        TileWithFocus(
-                            app = app, target = focusTarget, tick = focusTick, enabled = tilesEnabled,
-                            editing = editing == app.pkg, vm = vm, row = DOCK_ROW,
-                            onMenu = { menuFor = app },
-                            onUp = {
-                                if (editing == null) {
-                                    vm.setImmersive(true); true
-                                } else false
-                            },
-                        )
-                    }
-                }
-            }
-
-            state.others.chunked(COLUMNS).forEachIndexed { rowIndex, rowApps ->
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(TileGap),
-                    modifier = Modifier.padding(start = SidePadding, end = SidePadding, top = 18.dp),
-                ) {
-                    rowApps.forEach { app ->
-                        key(app.pkg) {
-                            TileWithFocus(
-                                app = app, target = focusTarget, tick = focusTick, enabled = tilesEnabled,
-                                editing = editing == app.pkg, vm = vm, row = rowIndex,
-                                onMenu = { menuFor = app },
-                            )
-                        }
-                    }
-                }
-            }
-            Spacer(Modifier.height(120.dp))
+        Backdrop(vm, screen)
+        when (screen) {
+            Screen.HOME -> HomePage(vm, state, ::openMenu)
+            Screen.APPS -> AppsPage(vm, "Alle Apps", state.apps, keyPrefix = "apps", favorites = state.favorites, openMenu = ::openMenu)
+            Screen.INPUTS -> InputsPage(vm, state, ::openMenu)
+            Screen.AIRPLAY -> AirPlayPage(vm)
+            Screen.SETTINGS -> SettingsPage(vm, state.drawer.size)
+            Screen.PHOTO -> PhotoPage(vm)
         }
+        if (screen != Screen.PHOTO) Sidebar(vm, overPhoto = screen == Screen.HOME && vm.photoBackground.collectAsStateWithLifecycle().value)
 
-        TopClock(vm, immersive)
-        if (editing != null) EditHint(Modifier.align(Alignment.BottomCenter).padding(bottom = 22.dp))
-
-        if (immersive) {
-            ImmersiveLayer(vm, onExit = { vm.setImmersive(false) })
-        }
-        if (airplay) AirPlayScreen(onClose = { vm.closeAirPlay() })
-        if (controlCenter) {
-            ControlCenter(vm, hiddenCount = state.hiddenCount, onClose = { vm.closeControlCenter() })
-        }
-        switcher?.let { s -> AppSwitcher(vm, s) }
         if (drawerOpen) {
-            AppDrawer(
-                vm = vm, apps = state.drawer, target = focusTarget, tick = focusTick,
-                enabled = menuFor == null, onMenu = { menuFor = it },
-            )
+            Box(Modifier.fillMaxSize().background(InkBg)) {
+                BackHandler { vm.closeDrawer() }
+                AppsPage(
+                    vm, "Weitere Apps", state.drawer, keyPrefix = "drawer", favorites = state.favorites,
+                    openMenu = ::openMenu, drawer = true, start = 56.dp,
+                )
+            }
         }
 
-        menuFor?.let { app ->
-            val isFav = state.favorites.any { it.pkg == app.pkg }
-            val inDrawer = state.drawer.any { it.pkg == app.pkg }
-            ContextMenu(
-                app = app,
-                actions = buildList<Pair<String, () -> Unit>> {
-                    if (inDrawer) {
-                        if (app.pkg != SETTINGS_ID) add("Auf Home anzeigen" to { vm.showOnHome(app.pkg) })
-                        add("Öffnen" to { launch(context, app) })
-                        if (app.pkg != SETTINGS_ID && !app.pkg.startsWith(INPUT_PREFIX)) {
-                            add("Deinstallieren" to { uninstall(context, app.pkg) })
-                            add("App-Info" to { openAppInfo(context, app.pkg) })
-                        }
-                    } else if (app.pkg != SETTINGS_ID) {
-                        add("Bewegen" to { vm.startEdit(app.pkg) })
-                        add((if (isFav) "Aus oberer Reihe entfernen" else "In obere Reihe") to { vm.toggleFavorite(app.pkg) })
-                        add("In „Weitere Apps“" to { vm.hide(app.pkg) })
-                        if (!app.pkg.startsWith(INPUT_PREFIX)) {
-                            add("Deinstallieren" to { uninstall(context, app.pkg) })
-                            add("App-Info" to { openAppInfo(context, app.pkg) })
-                        }
-                    } else {
-                        add("Öffnen" to { launch(context, app) })
-                    }
-                },
-                onClose = {
-                    menuFor = null
-                    requestFocusOn(app.pkg)
-                },
-            )
+        menu?.let { (app, actions) ->
+            ContextMenu(app.label, actions, onClose = {
+                menu = null
+                vm.requestRestore()
+            })
         }
     }
 }
 
-/** "Weitere Apps": everything kept off the home screen. Yellow key or Control Center; Back closes. */
+// ---------------------------------------------------------------------------------------------- background
+
+/**
+ * One full-screen image at most: the calm gradient (default) or a photo with the shade baked in.
+ * Pages without artwork are plain near-black (cheapest possible).
+ */
 @Composable
-private fun AppDrawer(
-    vm: HomeViewModel,
-    apps: List<AppEntry>,
-    target: String?,
-    tick: Int,
-    enabled: Boolean,
-    onMenu: (AppEntry) -> Unit,
-) {
-    BackHandler { vm.closeDrawer() }
-    val first = apps.firstOrNull()?.pkg
+private fun Backdrop(vm: HomeViewModel, screen: Screen) {
+    val usePhoto by vm.photoBackground.collectAsStateWithLifecycle()
+    val photo by vm.photo.collectAsStateWithLifecycle()
+    val gradient = remember { Art.homeGradient().asImageBitmap() }
+    val image: ImageBitmap? = when (screen) {
+        Screen.HOME -> if (usePhoto) photo ?: gradient else gradient
+        Screen.PHOTO -> photo ?: gradient
+        Screen.AIRPLAY -> gradient
+        else -> null
+    }
+    if (image == null) {
+        Box(Modifier.fillMaxSize().background(InkBg))
+    } else {
+        Crossfade(targetState = image, animationSpec = tween(400), label = "backdrop") { img ->
+            Image(img, null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------- start page
+
+@Composable
+private fun HomePage(vm: HomeViewModel, state: HomeState, openMenu: (AppEntry, List<MenuAction>) -> Unit) {
+    val context = LocalContext.current
+    val recents by vm.recents.collectAsStateWithLifecycle()
+    var lowerRow by remember { mutableStateOf(false) }
+    // the page slides up when the home-apps row is focused (no recomposition: read in the layer)
+    val lift by animateFloatAsState(if (lowerRow) 1f else 0f, spring(dampingRatio = 1f, stiffness = 500f), label = "lift")
+
     Box(
         Modifier
             .fillMaxSize()
-            .background(Color(0xF00D0F14))
+            .graphicsLayer { translationY = -lift * 190.dp.toPx() }
     ) {
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(COLUMNS),
-            contentPadding = PaddingValues(start = SidePadding, end = SidePadding, top = 96.dp, bottom = 60.dp),
-            horizontalArrangement = Arrangement.spacedBy(TileGap),
-            verticalArrangement = Arrangement.spacedBy(18.dp),
-            modifier = Modifier.fillMaxSize(),
+        Column(Modifier.padding(start = ContentStart, top = 40.dp).graphicsLayer { alpha = 1f - lift }) {
+            Txt(rememberDate(), size = 11.sp, weight = FontWeight.Medium, color = Color.White.copy(alpha = 0.8f))
+            Txt(rememberClock(), size = 57.sp, weight = FontWeight.Light, letterSpacing = (-1.9).sp)
+        }
+
+        Txt("Zuletzt", size = 15.sp, weight = FontWeight.SemiBold, modifier = Modifier.padding(start = ContentStart, top = 264.dp))
+        LazyRow(
+            contentPadding = PaddingValues(start = ContentStart, end = 48.dp),
+            horizontalArrangement = Arrangement.spacedBy(21.dp),
+            modifier = Modifier.padding(top = 292.dp).fillMaxWidth(),
         ) {
-            items(apps, key = { it.pkg }) { app ->
-                TileWithFocus(
-                    app = app, target = target, tick = tick, enabled = enabled,
-                    editing = false, vm = vm, row = DRAWER_ROW,
-                    onMenu = { onMenu(app) },
-                    autoFocus = app.pkg == first,
+            items(recents, key = { "r:" + it.pkg }) { app ->
+                AppCard(
+                    vm, app, key = "home:recent:${app.pkg}", width = 249.dp, height = 140.dp, radius = 16.dp,
+                    label = Label.FOCUSED, big = true, autofocus = app == recents.first(),
+                    onFocus = { lowerRow = false },
+                    onClick = { launch(context, app) },
+                    onMenu = {
+                        openMenu(app, buildList<MenuAction> {
+                            if (state.favorites.none { it.pkg == app.pkg }) add("Zur Startseite hinzufügen" to { vm.addToHome(app.pkg) })
+                            add("App-Info" to { openAppInfo(context, app.pkg) })
+                        })
+                    },
                 )
             }
         }
-        Column(Modifier.padding(start = 56.dp, top = 34.dp)) {
-            Txt("Weitere Apps", size = 30.sp, weight = FontWeight.ExtraBold, letterSpacing = (-0.5).sp)
-            Txt("MENU: auf Home anzeigen  ·  Zurück: schließen", size = 12.sp, color = Color.White.copy(alpha = 0.55f))
-        }
-        if (apps.isEmpty()) {
-            Txt("Keine weiteren Apps", size = 18.sp, color = Color.White.copy(alpha = 0.7f), modifier = Modifier.align(Alignment.Center))
+
+        LazyRow(
+            contentPadding = PaddingValues(start = ContentStart, end = 48.dp),
+            horizontalArrangement = Arrangement.spacedBy(15.dp),
+            modifier = Modifier.padding(top = 484.dp).fillMaxWidth(),
+        ) {
+            items(state.favorites, key = { "f:" + it.pkg }) { app ->
+                val idx = state.favorites.indexOf(app)
+                val menuActions = {
+                    openMenu(app, buildList<MenuAction> {
+                        if (idx > 0) add("Nach links" to { vm.moveOnHome(app.pkg, -1) })
+                        if (idx < state.favorites.size - 1) add("Nach rechts" to { vm.moveOnHome(app.pkg, 1) })
+                        add("Von Startseite entfernen" to { vm.removeFromHome(app.pkg) })
+                        if (app.kind == Kind.APP) {
+                            add("In „Weitere Apps“" to { vm.hide(app.pkg) })
+                            add("Deinstallieren" to { uninstall(context, app.pkg) })
+                            add("App-Info" to { openAppInfo(context, app.pkg) })
+                        }
+                    })
+                }
+                if (app.kind == Kind.INPUT) {
+                    InputCard(
+                        vm, app, key = "home:fav:${app.pkg}", width = 132.dp, height = 74.dp, caption = null,
+                        onFocus = { lowerRow = true }, onClick = { launch(context, app) }, onMenu = menuActions,
+                    )
+                } else {
+                    AppCard(
+                        vm, app, key = "home:fav:${app.pkg}", width = 132.dp, height = 74.dp, radius = 12.dp,
+                        label = Label.FOCUSED, onFocus = { lowerRow = true },
+                        onClick = { launch(context, app) }, onMenu = menuActions,
+                    )
+                }
+            }
         }
     }
 }
 
-private const val DRAWER_ROW = -100
+// ---------------------------------------------------------------------------------------------- app grids
 
 @Composable
-private fun TileWithFocus(
-    app: AppEntry,
-    target: String?,
-    tick: Int,
-    enabled: Boolean,
-    editing: Boolean,
+private fun PageTitle(title: String, start: androidx.compose.ui.unit.Dp = ContentStart) {
+    Row(
+        Modifier.fillMaxWidth().padding(start = start, end = 42.dp, top = 30.dp),
+        verticalAlignment = Alignment.Bottom,
+    ) {
+        Txt(title, size = 25.sp, weight = FontWeight.Bold, letterSpacing = (-0.4).sp, modifier = Modifier.weight(1f))
+        Txt(rememberClock(), size = 13.sp, color = Color.White.copy(alpha = 0.8f))
+    }
+}
+
+@Composable
+private fun AppsPage(
     vm: HomeViewModel,
-    row: Int,
-    onMenu: () -> Unit,
-    onUp: (() -> Boolean)? = null,
-    autoFocus: Boolean = false,
+    title: String,
+    apps: List<AppEntry>,
+    keyPrefix: String,
+    favorites: List<AppEntry>,
+    openMenu: (AppEntry, List<MenuAction>) -> Unit,
+    drawer: Boolean = false,
+    start: androidx.compose.ui.unit.Dp = ContentStart,
 ) {
     val context = LocalContext.current
-    val requester = remember { FocusRequester() }
-    LaunchedEffect(tick, enabled) {
-        if (enabled && target == app.pkg) {
-            delay(30)
-            runCatching { requester.requestFocus() }
+    Column(Modifier.fillMaxSize()) {
+        PageTitle(title, start)
+        if (apps.isEmpty()) {
+            Txt("Keine Apps", size = 15.sp, color = Color.White.copy(alpha = 0.6f), modifier = Modifier.padding(start = start, top = 40.dp))
         }
-    }
-    LaunchedEffect(Unit) {
-        if (autoFocus && enabled) {
-            delay(60)
-            runCatching { requester.requestFocus() }
-        }
-    }
-    val inDrawer = row == DRAWER_ROW
-    AppTile(
-        app = app,
-        focusRequester = requester,
-        enabled = enabled,
-        editing = editing,
-        onFocused = { if (!inDrawer) vm.onFocus(app, row) },
-        onOpen = { if (inDrawer) vm.closeDrawer(); launch(context, app) },
-        onLongPress = { if (inDrawer) onMenu() else vm.startEdit(app.pkg) },
-        onMenu = onMenu,
-        onEditMove = { dir -> vm.editMove(app.pkg, dir) },
-        onEditDone = { vm.endEdit() },
-        onUp = onUp,
-    )
-}
-
-/** Glass shelf behind the top row: dark glass over the Top Shelf art, frosted light glass over the wallpaper. */
-@Composable
-private fun Dock(vm: HomeViewModel, content: @Composable () -> Unit) {
-    val row by vm.focusRow.collectAsStateWithLifecycle()
-    val light = row != DOCK_ROW
-    val shape = RoundedCornerShape(26.dp)
-    val fill by animateColorAsState(
-        if (light) Color.White.copy(alpha = 0.16f) else Color(0xFF12141A).copy(alpha = 0.26f), tween(300), label = "dockFill"
-    )
-    val edge by animateColorAsState(
-        if (light) Color.White.copy(alpha = 0.22f) else Color.White.copy(alpha = 0.10f), tween(300), label = "dockEdge"
-    )
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 24.dp)
-            .height(DockHeight)
-            .background(fill, shape)
-            .border(1.dp, edge, shape)
-            .padding(top = 18.dp)
-    ) { content() }
-}
-
-/**
- * Wallpaper + Top Shelf. Only one full-screen image is drawn when the shelf is fully shown or hidden,
- * which matters a lot on weak TV GPUs.
- */
-@Composable
-private fun Backdrop(vm: HomeViewModel) {
-    val row by vm.focusRow.collectAsStateWithLifecycle()
-    val immersive by vm.immersive.collectAsStateWithLifecycle()
-    val heroAlpha by animateFloatAsState(
-        if (row == DOCK_ROW || immersive) 1f else 0f, tween(260), label = "heroAlpha"
-    )
-    if (heroAlpha < 1f) WallpaperLayer(vm)
-    if (heroAlpha > 0f) {
-        Box(Modifier.fillMaxSize().graphicsLayer { alpha = heroAlpha }) { HeroLayer(vm) }
-    }
-}
-
-/** Behind the grid: the current photo, frosted (blurred + slightly darkened), or a calm pastel. */
-@Composable
-private fun WallpaperLayer(vm: HomeViewModel) {
-    val photo by vm.photo.collectAsStateWithLifecycle()
-    val frosted = photo?.frosted
-    if (frosted != null) {
-        Crossfade(targetState = frosted, animationSpec = tween(500), label = "frosted") { img ->
-            Image(img, null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-        }
-    } else {
-        val pastel = remember { Art.pastelWallpaper() }
-        Image(
-            bitmap = pastel,
-            contentDescription = null,
-            contentScale = ContentScale.Crop,
-            // slight darkening so white labels stay readable, without an extra layer
-            colorFilter = ColorFilter.tint(Color.Black.copy(alpha = 0.10f), BlendMode.SrcAtop),
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(4),
+            contentPadding = PaddingValues(start = start, end = 42.dp, top = 30.dp, bottom = 60.dp),
+            horizontalArrangement = Arrangement.spacedBy(21.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp),
             modifier = Modifier.fillMaxSize(),
-        )
-    }
-}
-
-@Composable
-private fun HeroLayer(vm: HomeViewModel) {
-    val hero by vm.hero.collectAsStateWithLifecycle()
-    val slide by vm.slide.collectAsStateWithLifecycle()
-    val immersive by vm.immersive.collectAsStateWithLifecycle()
-    val h = hero ?: return
-
-    // auto-advance like the real Top Shelf
-    LaunchedEffect(h.app.pkg, h.slides.size, slide) {
-        if (h.slides.size > 1) {
-            delay(8000)
-            vm.nextSlide()
-        }
-    }
-
-    val current = h.slides.getOrNull(slide)
-    Crossfade(targetState = current?.image ?: h.art, animationSpec = tween(450), label = "hero") { img ->
-        Image(
-            bitmap = img,
-            contentDescription = null,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxSize(),
-        )
-    }
-    if (current?.image != null || h.artIsPhoto) {
-        // photos get the shade the generated art has baked in
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        0f to Color.Black.copy(alpha = 0.35f), 0.35f to Color.Transparent,
-                        0.6f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.55f),
-                    )
-                )
-        )
-    }
-    if (h.slides.size > 1) {
-        PageDots(
-            count = h.slides.size, index = slide,
-            modifier = Modifier
-                .fillMaxSize()
-                .wrapContentHeight(Alignment.Bottom)
-                .padding(bottom = if (immersive) 34.dp else DockHeight + RowPeek + 14.dp),
-        )
-    }
-}
-
-@Composable
-private fun PageDots(count: Int, index: Int, modifier: Modifier) {
-    Box(modifier, contentAlignment = Alignment.Center) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            repeat(count) { i ->
-                Box(
-                    Modifier
-                        .size(if (i == index) 8.dp else 6.dp)
-                        .clip(CircleShape)
-                        .background(Color.White.copy(alpha = if (i == index) 0.95f else 0.45f))
+        ) {
+            items(apps.size, key = { apps[it].pkg }) { i ->
+                val app = apps[i]
+                val onHome = favorites.any { it.pkg == app.pkg }
+                AppCard(
+                    vm, app, key = "$keyPrefix:${app.pkg}", width = null, height = 104.dp, radius = 15.dp,
+                    label = Label.ALWAYS, autofocus = i == 0,
+                    onClick = {
+                        if (drawer) vm.closeDrawer()
+                        launch(context, app)
+                    },
+                    onMenu = {
+                        openMenu(app, buildList<MenuAction> {
+                            if (app.pkg != SETTINGS_ID) {
+                                if (drawer) add("In „Alle Apps“ anzeigen" to { vm.showInApps(app.pkg) })
+                                add((if (onHome) "Von Startseite entfernen" else "Zur Startseite hinzufügen") to {
+                                    if (onHome) vm.removeFromHome(app.pkg) else vm.addToHome(app.pkg)
+                                })
+                                if (!drawer) add("In „Weitere Apps“" to { vm.hide(app.pkg) })
+                                add("Deinstallieren" to { uninstall(context, app.pkg) })
+                                add("App-Info" to { openAppInfo(context, app.pkg) })
+                            } else add("Öffnen" to { launch(context, app) })
+                        })
+                    },
                 )
             }
         }
     }
 }
 
-/** Small chevron at the top while on the Top Shelf: press Up for full screen. */
 @Composable
-private fun TopShelfHint(vm: HomeViewModel, immersive: Boolean) {
-    val row by vm.focusRow.collectAsStateWithLifecycle()
-    val alpha by animateFloatAsState(if (row == DOCK_ROW && !immersive) 0.85f else 0f, tween(250), label = "hint")
-    if (alpha == 0f) return
-    Box(Modifier.fillMaxWidth().padding(top = 16.dp), contentAlignment = Alignment.Center) {
-        Canvas(Modifier.size(26.dp, 12.dp).graphicsLayer { this.alpha = alpha }) {
-            val w = size.width
-            val hgt = size.height
-            drawLine(Color.White, Offset(w * 0.1f, hgt * 0.85f), Offset(w * 0.5f, hgt * 0.15f), 3.dp.toPx(), StrokeCap.Round)
-            drawLine(Color.White, Offset(w * 0.5f, hgt * 0.15f), Offset(w * 0.9f, hgt * 0.85f), 3.dp.toPx(), StrokeCap.Round)
-        }
-    }
-}
-
-@Composable
-private fun EditHint(modifier: Modifier) {
-    Box(
-        modifier
-            .clip(RoundedCornerShape(50))
-            .background(Color.Black.copy(alpha = 0.55f))
-            .padding(horizontal = 18.dp, vertical = 8.dp)
-    ) {
-        Txt("Pfeiltasten bewegen  ·  OK fertig  ·  MENU Optionen", size = 13.sp, weight = FontWeight.Medium)
-    }
-}
-
-/**
- * The only text on screen: a large light clock top-left on the photo, a small one top-right over the apps.
- * Hidden in photo mode, which shows its own.
- */
-@Composable
-private fun TopClock(vm: HomeViewModel, immersive: Boolean) {
-    val row by vm.focusRow.collectAsStateWithLifecycle()
-    val onShelf = row == DOCK_ROW
-    val big by animateFloatAsState(if (onShelf && !immersive) 1f else 0f, tween(260), label = "bigClock")
-    val small by animateFloatAsState(if (!onShelf && !immersive) 1f else 0f, tween(260), label = "smallClock")
-    val time = rememberClock()
-    Box(Modifier.fillMaxSize()) {
-        if (big > 0f) {
-            Txt(
-                time, size = 48.sp, weight = FontWeight.Light, letterSpacing = (-1.2).sp, shadow = SoftShadow,
-                modifier = Modifier.padding(start = 48.dp, top = 30.dp).graphicsLayer { alpha = big },
-            )
-        }
-        if (small > 0f) {
-            Txt(
-                time, size = 15.sp, weight = FontWeight.Normal, shadow = SoftShadow,
-                modifier = Modifier.align(Alignment.TopEnd).padding(top = 24.dp, end = 42.dp).graphicsLayer { alpha = small },
-            )
-        }
-    }
-}
-
-@Composable
-fun Avatar(size: Dp) {
-    Canvas(
-        Modifier
-            .size(size)
-            .clip(CircleShape)
-            .background(Color(0xFF6B7AA6))
-    ) {
-        val w = this.size.width
-        drawCircle(Color.White.copy(alpha = 0.92f), radius = w * 0.2f, center = Offset(w / 2, w * 0.38f))
-        drawCircle(Color.White.copy(alpha = 0.92f), radius = w * 0.34f, center = Offset(w / 2, w * 1.0f))
-    }
-}
-
-/** Full-screen Top Shelf: Left/Right flips pages, OK opens the content, Down/Back returns. */
-@Composable
-private fun ImmersiveLayer(vm: HomeViewModel, onExit: () -> Unit) {
+private fun InputsPage(vm: HomeViewModel, state: HomeState, openMenu: (AppEntry, List<MenuAction>) -> Unit) {
     val context = LocalContext.current
+    Column(Modifier.fillMaxSize()) {
+        PageTitle("Eingänge")
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(3),
+            contentPadding = PaddingValues(start = ContentStart, end = 42.dp, top = 48.dp, bottom = 60.dp),
+            horizontalArrangement = Arrangement.spacedBy(24.dp),
+            verticalArrangement = Arrangement.spacedBy(26.dp),
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            items(state.inputs.size, key = { state.inputs[it].pkg }) { i ->
+                val input = state.inputs[i]
+                val onHome = state.favorites.any { it.pkg == input.pkg }
+                InputCard(
+                    vm, input, key = "inputs:${input.pkg}", width = null, height = 150.dp,
+                    caption = if (input.pkg == LIVE_TV_ID) "Antenne · Kabel · Satellit" else null,
+                    autofocus = i == 0,
+                    onClick = { launch(context, input) },
+                    onMenu = {
+                        openMenu(input, listOf((if (onHome) "Von Startseite entfernen" else "Zur Startseite hinzufügen") to {
+                            if (onHome) vm.removeFromHome(input.pkg) else vm.addToHome(input.pkg)
+                        }))
+                    },
+                )
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------- AirPlay
+
+@Composable
+private fun AirPlayPage(vm: HomeViewModel) {
+    val context = LocalContext.current
+    val receiver = remember {
+        context.packageManager.getLeanbackLaunchIntentForPackage(AIRPLAY_PKG)
+            ?: context.packageManager.getLaunchIntentForPackage(AIRPLAY_PKG)
+    }
+    Box(Modifier.fillMaxSize().background(InkBg.copy(alpha = 0.45f))) {
+        Column(
+            Modifier
+                .align(Alignment.Center)
+                .padding(start = 66.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(13.dp),
+        ) {
+            Box(
+                Modifier
+                    .width(99.dp).height(99.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(Color.White.copy(alpha = 0.10f))
+                    .border(1.dp, Color.White.copy(alpha = 0.16f), RoundedCornerShape(50))
+                    .remembered(vm, "airplay:main", autofocus = true)
+                    .tvKeys(onClick = { receiver?.let { runCatching { context.startActivity(it) } } })
+                    .focusable(),
+                contentAlignment = Alignment.Center,
+            ) { GlyphIcon(Glyph.AIRPLAY, Color.White, 46.dp) }
+            Spacer(Modifier.height(4.dp))
+            Txt("Smart-TV", size = 39.sp, weight = FontWeight.Light, letterSpacing = (-1.1).sp)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.width(7.dp).height(7.dp).clip(RoundedCornerShape(50)).background(if (receiver != null) Color(0xFF4ADE80) else Color(0xFFF59E0B)))
+                Spacer(Modifier.width(8.dp))
+                Txt(if (receiver != null) "Bereit für AirPlay" else "Noch nicht installiert", size = 13.sp, color = Color.White.copy(alpha = 0.82f))
+            }
+            Spacer(Modifier.height(16.dp))
+            Txt(
+                if (receiver != null) "iPhone: Kontrollzentrum → Bildschirmsynchronisierung → Smart-TV"
+                else "Einmal am PC ausführen: ./tv.sh airplay",
+                size = 11.sp, color = Color.White.copy(alpha = 0.62f),
+            )
+        }
+    }
+}
+
+const val AIRPLAY_PKG = "io.github.jqssun.airplay"
+
+// ---------------------------------------------------------------------------------------------- settings
+
+@Composable
+private fun SettingsPage(vm: HomeViewModel, drawerCount: Int) {
+    val context = LocalContext.current
+    val photoBg by vm.photoBackground.collectAsStateWithLifecycle()
+    val bing by vm.bing.collectAsStateWithLifecycle()
+    val sounds by vm.sounds.collectAsStateWithLifecycle()
+    Box(Modifier.fillMaxSize()) {
+        Column(
+            Modifier.padding(start = ContentStart).width(345.dp).fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
+        ) {
+            Box(
+                Modifier.width(165.dp).height(165.dp).clip(RoundedCornerShape(39.dp)).background(Color(0xFF1F2229)),
+                contentAlignment = Alignment.Center,
+            ) { GlyphIcon(Glyph.GEAR, Color(0xFFD6D8DD), 78.dp) }
+            Txt("Einstellungen", size = 22.sp, weight = FontWeight.SemiBold, letterSpacing = (-0.3).sp)
+        }
+        androidx.compose.foundation.lazy.LazyColumn(
+            contentPadding = PaddingValues(top = 60.dp, bottom = 60.dp, end = 48.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.padding(start = 480.dp).fillMaxSize(),
+        ) {
+            item { SectionHeader("Darstellung") }
+            item {
+                SettingRow(vm, "settings:bg", "Hintergrund", if (photoBg) "Fotos" else "Verlauf", autofocus = true) {
+                    vm.setPhotoBackground(!photoBg)
+                }
+            }
+            item {
+                SettingRow(vm, "settings:bing", "Foto des Tages", if (bing) "An" else "Aus") { vm.setBing(!bing) }
+            }
+            item { SettingRow(vm, "settings:sounds", "Klicktöne", if (sounds) "An" else "Aus") { vm.setSounds(!sounds) } }
+            item { SectionHeader("Apps") }
+            item { SettingRow(vm, "settings:drawer", "Weitere Apps", "$drawerCount") { vm.toggleDrawer() } }
+            item { SectionHeader("Fernseher") }
+            item { SettingRow(vm, "settings:saver", "Bildschirmschoner", "") { startScreensaver(context) } }
+            item {
+                SettingRow(vm, "settings:sleep", "Ruhezustand", "") {
+                    if (!HomeKeyService.sleep()) startScreensaver(context)
+                }
+            }
+            item {
+                SettingRow(vm, "settings:system", "System-Einstellungen", "WLAN, Bild, Ton") {
+                    runCatching { context.startActivity(Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SectionHeader(text: String) {
+    Txt(text, size = 10.sp, weight = FontWeight.SemiBold, color = Color.White.copy(alpha = 0.5f), modifier = Modifier.padding(start = 15.dp, top = 12.dp, bottom = 2.dp))
+}
+
+@Composable
+private fun SettingRow(vm: HomeViewModel, key: String, title: String, value: String, autofocus: Boolean = false, onClick: () -> Unit) {
+    var focused by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(if (focused) 1.02f else 1f, spring(stiffness = 600f), label = "rowScale")
+    val ink = if (focused) Color(0xFF111318) else Color.White
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .height(44.dp)
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (focused) Color.White else Color.White.copy(alpha = 0.06f))
+            .remembered(vm, key, autofocus)
+            .onFocusChanged { focused = it.isFocused }
+            .tvKeys(onClick = onClick)
+            .focusable()
+            .padding(horizontal = 15.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Txt(title, size = 13.sp, weight = if (focused) FontWeight.SemiBold else FontWeight.Medium, color = ink, modifier = Modifier.weight(1f))
+        Txt(value, size = 13.sp, color = if (focused) Color(0xFF4B4F58) else Color.White.copy(alpha = 0.6f))
+    }
+}
+
+// ---------------------------------------------------------------------------------------------- photo mode
+
+/** Only the photo and a large, light clock. ◀ ▶ next photo, OK / Back return. */
+@Composable
+private fun PhotoPage(vm: HomeViewModel) {
     val requester = remember { FocusRequester() }
-    LaunchedEffect(Unit) { runCatching { requester.requestFocus() } }
-    BackHandler { onExit() }
+    LaunchedEffect(Unit) {
+        delay(30)
+        runCatching { requester.requestFocus() }
+    }
     Box(
         Modifier
             .fillMaxSize()
             .focusRequester(requester)
             .onKeyEvent { e ->
-                val passThrough = e.key == Key.Back || e.key == Key.Home
-                if (e.type != KeyEventType.KeyUp) return@onKeyEvent !passThrough
+                if (e.type != KeyEventType.KeyUp) return@onKeyEvent e.key != Key.Back && e.key != Key.Home
                 when {
-                    e.key == Key.DirectionDown -> { onExit(); true }
-                    e.key == Key.DirectionLeft -> { flip(vm, -1); true }
-                    e.key == Key.DirectionRight -> { flip(vm, 1); true }
-                    e.key.isOk() -> {
-                        val h = vm.hero.value
-                        val target = h?.slides?.getOrNull(vm.slide.value)?.intent
-                        Sounds.tock()
-                        if (target != null) {
-                            runCatching { context.startActivity(target.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-                        } else if (h != null) {
-                            launch(context, h.app)
-                        }
-                        true
+                    e.key == Key.DirectionLeft -> { vm.nextPhoto(-1); true }
+                    e.key == Key.DirectionRight -> { vm.nextPhoto(1); true }
+                    e.key.isOk() || e.key == Key.DirectionDown || e.key == Key.DirectionUp -> {
+                        vm.show(Screen.HOME); vm.focus(null); true
                     }
-                    else -> !passThrough
+                    else -> e.key != Key.Back && e.key != Key.Home
                 }
             }
             .focusable()
     ) {
-        PhotoModeOverlay(vm)
-    }
-}
-
-/** Left/Right in full screen: the app's own pages if it has several, otherwise the next photo. */
-private fun flip(vm: HomeViewModel, delta: Int) {
-    if ((vm.hero.value?.slides?.size ?: 0) > 1) vm.nextSlide(delta) else vm.nextPhoto(delta)
-}
-
-/** Photo mode: nothing but the photo and a large, light clock. */
-@Composable
-private fun PhotoModeOverlay(@Suppress("UNUSED_PARAMETER") vm: HomeViewModel) {
-    val time = rememberClock()
-    Box(Modifier.fillMaxSize().padding(end = 54.dp, bottom = 34.dp)) {
         Txt(
-            time, size = 78.sp, weight = FontWeight.Light, shadow = SoftShadow,
-            letterSpacing = (-2.2).sp, modifier = Modifier.align(Alignment.BottomEnd),
+            rememberClock(), size = 78.sp, weight = FontWeight.Light, shadow = SoftShadow, letterSpacing = (-2.2).sp,
+            modifier = Modifier.align(Alignment.BottomEnd).padding(end = 54.dp, bottom = 34.dp),
         )
     }
 }
 
+// ---------------------------------------------------------------------------------------------- menu
+
 @Composable
-private fun ContextMenu(app: AppEntry, actions: List<Pair<String, () -> Unit>>, onClose: () -> Unit) {
+private fun ContextMenu(title: String, actions: List<MenuAction>, onClose: () -> Unit) {
     BackHandler { onClose() }
-    Box(
-        Modifier
-            .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.55f)),
-        contentAlignment = Alignment.Center,
-    ) {
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f)), contentAlignment = Alignment.Center) {
         Column(
             Modifier
-                .width(340.dp)
-                .clip(RoundedCornerShape(24.dp))
+                .width(300.dp)
+                .clip(RoundedCornerShape(22.dp))
                 .background(Color(0xF21C1E25))
-                .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(24.dp))
-                .padding(12.dp)
+                .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(22.dp))
+                .padding(10.dp)
         ) {
-            Txt(app.label, size = 18.sp, weight = FontWeight.SemiBold, modifier = Modifier.padding(start = 14.dp, top = 6.dp, bottom = 10.dp))
+            Txt(title, size = 16.sp, weight = FontWeight.SemiBold, modifier = Modifier.padding(start = 12.dp, top = 6.dp, bottom = 8.dp))
             actions.forEachIndexed { i, (label, action) ->
                 MenuItem(label, autoFocus = i == 0) {
                     action()
@@ -618,7 +518,6 @@ private fun ContextMenu(app: AppEntry, actions: List<Pair<String, () -> Unit>>, 
 private fun MenuItem(text: String, autoFocus: Boolean, onClick: () -> Unit) {
     val requester = remember { FocusRequester() }
     var focused by remember { mutableStateOf(false) }
-    var armed by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         if (autoFocus) {
             delay(30)
@@ -628,30 +527,29 @@ private fun MenuItem(text: String, autoFocus: Boolean, onClick: () -> Unit) {
     Box(
         Modifier
             .fillMaxWidth()
-            .padding(vertical = 3.dp)
-            .clip(RoundedCornerShape(14.dp))
+            .padding(vertical = 2.dp)
+            .clip(RoundedCornerShape(12.dp))
             .background(if (focused) Color.White else Color.Transparent)
             .focusRequester(requester)
             .onFocusChanged {
                 if (it.isFocused && !focused) Sounds.tick()
                 focused = it.isFocused
             }
-            .onKeyEvent { e ->
-                if (e.key.isOk()) {
-                    // only a full press that started here (ignores the KeyUp of the press that opened the menu)
-                    if (e.type == KeyEventType.KeyDown && e.nativeKeyEvent.repeatCount == 0) {
-                        armed = true
-                    } else if (e.type == KeyEventType.KeyUp && armed) {
-                        armed = false; Sounds.tock(); onClick()
-                    }
-                    true
-                } else false
-            }
+            .tvKeys(onClick = onClick)
             .focusable()
-            .padding(horizontal = 16.dp, vertical = 12.dp)
+            .padding(horizontal = 14.dp, vertical = 11.dp)
     ) {
-        Txt(text, size = 15.sp, weight = FontWeight.Medium, color = if (focused) Color(0xFF111318) else Color.White)
+        Txt(text, size = 14.sp, weight = FontWeight.Medium, color = if (focused) Color(0xFF111318) else Color.White)
     }
+}
+
+// ---------------------------------------------------------------------------------------------- helpers
+
+@Composable
+private fun rememberDate(): String {
+    val fmt = remember { SimpleDateFormat("EEEE, d. MMMM", Locale.GERMANY) }
+    rememberClock() // re-evaluated with the clock
+    return fmt.format(Date())
 }
 
 internal fun launch(context: Context, app: AppEntry) {
@@ -666,10 +564,7 @@ internal fun launch(context: Context, app: AppEntry) {
 
 private fun openAppInfo(context: Context, pkg: String) {
     runCatching {
-        context.startActivity(
-            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$pkg"))
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        )
+        context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$pkg")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 }
 
@@ -677,4 +572,14 @@ private fun uninstall(context: Context, pkg: String) {
     runCatching {
         context.startActivity(Intent(Intent.ACTION_DELETE, Uri.parse("package:$pkg")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
+}
+
+fun startScreensaver(context: Context) {
+    val ok = runCatching {
+        context.startActivity(
+            Intent().setComponent(android.content.ComponentName("com.android.systemui", "com.android.systemui.Somnambulator"))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        )
+    }.isSuccess
+    if (!ok) runCatching { context.startActivity(Intent(Settings.ACTION_DREAM_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
 }

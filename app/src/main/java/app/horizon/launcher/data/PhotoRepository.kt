@@ -80,7 +80,7 @@ class PhotoRepository(private val context: Context) {
 
     companion object {
         /** Decodes a photo to at most [maxWidth] px wide in RGB_565 (half the memory of ARGB). */
-        fun decode(f: File, maxWidth: Int): Bitmap? = runCatching {
+        fun decode(f: File, maxWidth: Int, mutable: Boolean = false): Bitmap? = runCatching {
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             BitmapFactory.decodeFile(f.path, bounds)
             var sample = 1
@@ -88,6 +88,7 @@ class PhotoRepository(private val context: Context) {
             BitmapFactory.decodeFile(f.path, BitmapFactory.Options().apply {
                 inSampleSize = sample
                 inPreferredConfig = Bitmap.Config.RGB_565
+                inMutable = mutable
             })
         }.getOrNull()
     }

@@ -47,7 +47,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        vm.refreshImages()
+        vm.onResume()
     }
 
     /** Coming back from an app, a dialog or the screensaver: put focus back on the last tile. */
@@ -64,8 +64,8 @@ class MainActivity : ComponentActivity() {
 
     private fun handle(intent: Intent?, fresh: Boolean) {
         when (intent?.action) {
-            ACTION_CONTROL_CENTER -> vm.toggleControlCenter()
-            ACTION_SWITCHER -> vm.toggleSwitcher()
+            ACTION_CONTROL_CENTER -> vm.openSidebar()
+            ACTION_SWITCHER -> vm.goHome()
             else -> if (!fresh) vm.goHome()
         }
     }
@@ -77,9 +77,9 @@ class MainActivity : ComponentActivity() {
             Log.d(HomeViewModel.TAG, "key ${KeyEvent.keyCodeToString(event.keyCode)} repeat=${event.repeatCount}")
         }
         when (event.keyCode) {
-            // blue: Control Center, yellow: "Weitere Apps" (everything kept off the home screen)
+            // blue: sidebar, yellow: "Weitere Apps" (everything kept out of sight)
             KeyEvent.KEYCODE_PROG_BLUE -> {
-                if (event.action == KeyEvent.ACTION_UP) vm.toggleControlCenter()
+                if (event.action == KeyEvent.ACTION_UP) vm.openSidebar()
                 return true
             }
             KeyEvent.KEYCODE_PROG_YELLOW -> {

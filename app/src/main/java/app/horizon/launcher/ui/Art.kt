@@ -7,18 +7,15 @@ import android.graphics.Paint
 import android.graphics.RadialGradient
 import android.graphics.Shader
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.toArgb
 
-/** Soft colour-blob artwork, rendered once on the CPU into a small bitmap (cheap to draw full screen). */
+/** Artwork rendered once on the CPU into small bitmaps (cheap to draw full screen, little RAM). */
 object Art {
     data class Blob(val cx: Float, val cy: Float, val r: Float, val color: Int)
 
-    fun render(base: Int, blobs: List<Blob>, w: Int = 384, h: Int = 216, heroShade: Boolean = false): ImageBitmap =
-        renderBitmap(base, blobs, w, h, heroShade).asImageBitmap()
+    const val INK = 0xFF0D0F14.toInt()
 
-    fun renderBitmap(base: Int, blobs: List<Blob>, w: Int = 384, h: Int = 216, heroShade: Boolean = false): Bitmap {
+    fun renderBitmap(base: Int, blobs: List<Blob>, w: Int = 384, h: Int = 216): Bitmap {
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
         c.drawColor(base)
@@ -30,87 +27,42 @@ object Art {
             paint.shader = RadialGradient(x, y, r, b.color, b.color and 0x00FFFFFF, Shader.TileMode.CLAMP)
             c.drawCircle(x, y, r, paint)
         }
-        if (heroShade) {
-            // baked in instead of an extra full-screen layer: dark top for the title, dark bottom for the dock
-            paint.shader = LinearGradient(
-                0f, 0f, 0f, h.toFloat(),
-                intArrayOf(0x59000000, 0x00000000, 0x00000000, 0x8C000000.toInt()),
-                floatArrayOf(0f, 0.35f, 0.6f, 1f), Shader.TileMode.CLAMP,
-            )
-            c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), paint)
-        }
         return bmp
     }
 
     /**
-     * Frosted-glass version of a photo for behind the app grid: small, strongly blurred, slightly darkened.
-     * Done once per photo on the CPU (Android 11 has no live blur), then simply stretched full screen.
+     * The calm "not really a picture" home background: dusk colours at the top,
+     * fading into near-black where the cards sit. 384x216 px, ~330 KB, stretched full screen.
      */
-    fun frosted(src: Bitmap): ImageBitmap {
-        val w = 192
-        val h = 108
-        val small = Bitmap.createScaledBitmap(src, w, h, true)
-        val a = IntArray(w * h)
-        val b = IntArray(w * h)
-        small.getPixels(a, 0, w, 0, 0, w, h)
-        repeat(3) {
-            boxBlur(a, b, w, h, 4, horizontal = true)
-            boxBlur(b, a, w, h, 4, horizontal = false)
-        }
-        // darken ~15 % so white labels stay readable on bright photos
-        for (i in a.indices) {
-            val p = a[i]
-            val r = ((p shr 16) and 0xFF) * 85 / 100
-            val g = ((p shr 8) and 0xFF) * 85 / 100
-            val bl = (p and 0xFF) * 85 / 100
-            a[i] = (0xFF shl 24) or (r shl 16) or (g shl 8) or bl
-        }
-        return Bitmap.createBitmap(a, w, h, Bitmap.Config.ARGB_8888).asImageBitmap()
+    fun homeGradient(): Bitmap {
+        val w = 384
+        val h = 216
+        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        val p = Paint(Paint.ANTI_ALIAS_FLAG or Paint.DITHER_FLAG)
+        c.drawColor(INK)
+        p.shader = LinearGradient(0f, 0f, 0f, h * 0.65f, intArrayOf(0xFF2E3A4F.toInt(), 0xFF6C5A4C.toInt(), 0xFF8A6F55.toInt()),
+            floatArrayOf(0f, 0.7f, 1f), Shader.TileMode.CLAMP)
+        c.drawRect(0f, 0f, w.toFloat(), h * 0.65f, p)
+        p.shader = null
+        p.color = 0xFF3A3530.toInt()
+        c.drawOval(w * 0.30f, h * 0.29f, w * 1.16f, h * 1.02f, p)
+        p.color = 0xFF2B2A2A.toInt()
+        c.drawOval(w * -0.16f, h * 0.36f, w * 0.55f, h * 1.08f, p)
+        shade(c, w, h, p, strength = 1f)
+        return bmp
     }
 
-    private fun boxBlur(src: IntArray, dst: IntArray, w: Int, h: Int, r: Int, horizontal: Boolean) {
-        val outer = if (horizontal) h else w
-        val inner = if (horizontal) w else h
-        for (o in 0 until outer) {
-            for (i in 0 until inner) {
-                var sr = 0; var sg = 0; var sb = 0; var n = 0
-                for (k in -r..r) {
-                    val j = (i + k).coerceIn(0, inner - 1)
-                    val p = if (horizontal) src[o * w + j] else src[j * w + o]
-                    sr += (p shr 16) and 0xFF; sg += (p shr 8) and 0xFF; sb += p and 0xFF
-                    n++
-                }
-                val idx = if (horizontal) o * w + i else i * w + o
-                dst[idx] = (0xFF shl 24) or ((sr / n) shl 16) or ((sg / n) shl 8) or (sb / n)
-            }
-        }
+    /** Darkens the lower part (for the cards) and the left edge (for the clock), baked in. */
+    fun shade(c: Canvas, w: Int, h: Int, p: Paint, strength: Float) {
+        fun a(alpha: Float) = (((alpha * strength).coerceIn(0f, 1f) * 255).toInt() shl 24) or (INK and 0xFFFFFF)
+        p.shader = LinearGradient(0f, 0f, 0f, h.toFloat(),
+            intArrayOf(a(0f), a(0f), a(0.85f), a(1f)), floatArrayOf(0f, 0.38f, 0.66f, 0.80f), Shader.TileMode.CLAMP)
+        c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), p)
+        p.shader = LinearGradient(0f, 0f, w * 0.42f, 0f, a(0.5f), a(0f), Shader.TileMode.CLAMP)
+        c.drawRect(0f, 0f, w * 0.42f, h.toFloat(), p)
+        p.shader = null
     }
-
-    /** Original "aurora" artwork in an app's own colours. */
-    fun aurora(accent: Color, seed: Int = 0): ImageBitmap {
-        val p = palette(accent)
-        val s = (seed % 3) * 0.08f
-        return render(
-            p[0],
-            listOf(
-                Blob(0.22f + s, 0.30f, 0.80f, p[1]),
-                Blob(0.85f - s, 0.15f + s, 0.60f, p[2]),
-                Blob(0.70f, 0.85f - s, 0.70f, p[3]),
-            ),
-            heroShade = true,
-        )
-    }
-
-    /** Calm light wallpaper behind the app grid, the same for every app. */
-    fun pastelWallpaper(): ImageBitmap = render(
-        0xFFDCE3EB.toInt(),
-        listOf(
-            Blob(0.18f, 0.22f, 0.75f, 0xFFADCBE8.toInt()),
-            Blob(0.88f, 0.18f, 0.55f, 0xFFEBD9C1.toInt()),
-            Blob(0.62f, 0.95f, 0.65f, 0xFFC6D5E4.toInt()),
-            Blob(0.05f, 0.95f, 0.45f, 0xFFE4D9CB.toInt()),
-        ),
-    )
 
     fun palette(accent: Color): List<Int> {
         val out = FloatArray(3)
@@ -119,11 +71,6 @@ object Art {
             android.graphics.Color.HSVToColor(floatArrayOf((h + 360f) % 360f, s.coerceIn(0f, 1f), v.coerceIn(0f, 1f)))
         val h = out[0]
         val s = out[1].coerceAtLeast(0.35f)
-        return listOf(
-            hsv(h, s * 0.9f, 0.22f),          // deep base
-            hsv(h, s, 0.85f),                 // main colour
-            hsv(h + 35f, s * 0.7f, 0.95f),    // warm neighbour
-            hsv(h - 40f, s * 0.8f, 0.60f),    // cool neighbour
-        )
+        return listOf(hsv(h, s * 0.9f, 0.22f), hsv(h, s, 0.85f), hsv(h + 35f, s * 0.7f, 0.95f), hsv(h - 40f, s * 0.8f, 0.60f))
     }
 }

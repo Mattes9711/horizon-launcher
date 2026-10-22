@@ -23,6 +23,7 @@ class LayoutStore(private val context: Context) {
     private val pinnedKey = stringPreferencesKey("pinned")
     private val soundsKey = booleanPreferencesKey("sounds")
     private val bingKey = booleanPreferencesKey("bing")
+    private val photoBgKey = booleanPreferencesKey("photo_background")
 
     val layout: Flow<SavedLayout> = context.layoutDataStore.data.map { p ->
         SavedLayout(
@@ -36,7 +37,14 @@ class LayoutStore(private val context: Context) {
     val sounds: Flow<Boolean> = context.layoutDataStore.data.map { it[soundsKey] ?: true }
 
     /** Bing photo of the day as background (only network use of the launcher). */
-    val bing: Flow<Boolean> = context.layoutDataStore.data.map { it[bingKey] ?: true }
+    val bing: Flow<Boolean> = context.layoutDataStore.data.map { it[bingKey] ?: false }
+
+    /** Home background: false = calm colour gradient (default), true = photos. */
+    val photoBackground: Flow<Boolean> = context.layoutDataStore.data.map { it[photoBgKey] ?: false }
+
+    suspend fun setPhotoBackground(on: Boolean) {
+        context.layoutDataStore.edit { it[photoBgKey] = on }
+    }
 
     suspend fun save(favorites: List<String>, order: List<String>) {
         context.layoutDataStore.edit {

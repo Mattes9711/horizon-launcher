@@ -16,7 +16,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /** Simple line icons drawn in code (no icon fonts or third-party artwork). */
-enum class Glyph { POWER, MOON, SPEAKER, SPARKLE, INPUT, WIFI, GEAR, EYE, CARDS, NOTE, AIRPLAY, PHOTO }
+enum class Glyph { POWER, MOON, SPEAKER, SPARKLE, INPUT, WIFI, GEAR, EYE, CARDS, NOTE, AIRPLAY, PHOTO, HOME, GRID, HDMI }
 
 @Composable
 fun GlyphIcon(glyph: Glyph, color: Color, size: Dp = 26.dp) {
@@ -106,6 +106,26 @@ private fun DrawScope.draw(g: Glyph, c: Color) {
             }
             drawPath(hill, c)
             drawCircle(c, w * 0.07f, Offset(w * 0.7f, w * 0.34f))
+        }
+        Glyph.HOME -> {
+            val p = androidx.compose.ui.graphics.Path().apply {
+                moveTo(w * 0.12f, w * 0.46f); lineTo(w * 0.5f, w * 0.16f); lineTo(w * 0.88f, w * 0.46f)
+                moveTo(w * 0.22f, w * 0.40f); lineTo(w * 0.22f, w * 0.84f); lineTo(w * 0.78f, w * 0.84f); lineTo(w * 0.78f, w * 0.40f)
+            }
+            drawPath(p, c, style = Stroke(width = s.width, cap = StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
+        }
+        Glyph.GRID -> {
+            val r = androidx.compose.ui.geometry.CornerRadius(w * 0.07f)
+            for (x in listOf(0.14f, 0.56f)) for (y in listOf(0.14f, 0.56f)) {
+                drawRoundRect(c, Offset(w * x, w * y), Size(w * 0.3f, w * 0.3f), r, style = s)
+            }
+        }
+        Glyph.HDMI -> {
+            val p = androidx.compose.ui.graphics.Path().apply {
+                moveTo(w * 0.1f, w * 0.36f); lineTo(w * 0.9f, w * 0.36f); lineTo(w * 0.9f, w * 0.54f)
+                lineTo(w * 0.8f, w * 0.68f); lineTo(w * 0.2f, w * 0.68f); lineTo(w * 0.1f, w * 0.54f); close()
+            }
+            drawPath(p, c, style = Stroke(width = s.width, join = androidx.compose.ui.graphics.StrokeJoin.Round))
         }
         Glyph.NOTE -> {
             drawCircle(c, w * 0.13f, Offset(w * 0.3f, w * 0.74f))
