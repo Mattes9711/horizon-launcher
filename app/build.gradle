@@ -1,0 +1,41 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'app.horizon.launcher'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'app.horizon.launcher'
+        minSdk 23
+        targetSdk 34
+        versionCode 1
+        versionName '1.0'
+    }
+
+    // Fixed key so every build can be installed over the previous one (updates keep your favourites).
+    signingConfigs {
+        horizon {
+            storeFile file('horizon.keystore')
+            storePassword 'horizon-tv'
+            keyAlias 'horizon'
+            keyPassword 'horizon-tv'
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.horizon
+        }
+        debug {
+            signingConfig signingConfigs.horizon
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
+    }
+}
