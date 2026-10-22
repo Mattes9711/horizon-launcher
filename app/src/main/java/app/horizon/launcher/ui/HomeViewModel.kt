@@ -1,9 +1,13 @@
 package app.horizon.launcher.ui
 
 import android.app.Application
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.util.Log
 import android.util.LruCache
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import app.horizon.launcher.data.AppEntry
@@ -22,6 +26,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 
 data class HomeState(
     val favorites: List<AppEntry> = emptyList(),
@@ -29,8 +34,11 @@ data class HomeState(
     val loaded: Boolean = false,
 )
 
-/** Background for the hero area: a blurred banner, or a colour wash for apps without one. */
-data class Backdrop(val pkg: String, val image: ImageBitmap?, val accent: Color)
+/** Full-screen artwork shown while a top-row app is focused. */
+data class Hero(val pkg: String, val title: String, val image: ImageBitmap?, val accent: Color)
+
+/** Row of the focused tile: -1 = top row (dock), 0.. = grid rows. */
+const val DOCK_ROW = -1
 
 class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -42,12 +50,16 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         if (list == null) HomeState() else arrange(list, layout)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, HomeState())
 
-    private val focusedApp = MutableStateFlow<AppEntry?>(null)
-    private val _focusInTopRow = MutableStateFlow(true)
-    val focusInTopRow: StateFlow<Boolean> = _focusInTopRow.asStateFlow()
+    private val topRowApp = MutableStateFlow<AppEntry?>(null)
 
-    private val _backdrop = MutableStateFlow<Backdrop?>(null)
-    val backdrop: StateFlow<Backdrop?> = _backdrop.asStateFlow()
+    private val _focusRow = MutableStateFlow(DOCK_ROW)
+    val focusRow: StateFlow<Int> = _focusRow.asStateFlow()
+
+    private val _hero = MutableStateFlow<Hero?>(null)
+    val hero: StateFlow<Hero?> = _hero.asStateFlow()
+
+    private val _wallpaper = MutableStateFlow<ImageBitmap?>(null)
+    val wallpaper: StateFlow<ImageBitmap?> = _wallpaper.asStateFlow()
 
     private val _immersive = MutableStateFlow(false)
     val immersive: StateFlow<Boolean> = _immersive.asStateFlow()
@@ -56,34 +68,57 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     private val _homeTick = MutableStateFlow(0)
     val homeTick: StateFlow<Int> = _homeTick.asStateFlow()
 
-    private val blurCache = LruCache<String, ImageBitmap>(12)
+    /** Bumped when focus should be put back on [lastFocusedPkg] (window regained focus, list reloaded). */
+    private val _restoreTick = MutableStateFlow(0)
+    val restoreTick: StateFlow<Int> = _restoreTick.asStateFlow()
+
+    var lastFocusedPkg: String? = null
+        private set
+
+    private val heroCache = LruCache<String, ImageBitmap>(4)
+    private var imageStamp = ""
 
     init {
         reload()
         viewModelScope.launch {
-            focusedApp.collectLatest { app ->
+            topRowApp.collectLatest { app ->
                 if (app == null) return@collectLatest
-                delay(140) // don't rebuild the background while the user scrolls fast
-                val image = app.source?.let { src ->
-                    blurCache.get(app.pkg) ?: withContext(Dispatchers.Default) {
-                        AppRepository.backdropFrom(src)
-                    }.also { blurCache.put(app.pkg, it) }
-                }
-                _backdrop.value = Backdrop(app.pkg, image, app.accent)
+                delay(120) // don't swap artwork while the user scrolls fast
+                val image = withContext(Dispatchers.IO) { userHero(app.pkg) }
+                _hero.value = Hero(app.pkg, app.label, image, app.accent)
             }
         }
     }
 
     fun reload() {
-        viewModelScope.launch { apps.value = repo.load() }
+        viewModelScope.launch {
+            apps.value = repo.load()
+            Log.d(TAG, "apps reloaded")
+            _restoreTick.value++
+        }
     }
 
-    val focusedPkg: String? get() = focusedApp.value?.pkg
+    /** Called on every resume: picks up wallpaper / hero images pushed with tv.sh. */
+    fun refreshImages() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val dir = getApplication<Application>().getExternalFilesDir(null) ?: return@launch
+            val stamp = dir.walkTopDown().filter { it.isFile }.joinToString { "${it.name}:${it.lastModified()}" }
+            if (stamp == imageStamp) return@launch
+            imageStamp = stamp
+            heroCache.evictAll()
+            _wallpaper.value = findImage(dir, "wallpaper")?.let { decode(it) }
+            topRowApp.value?.let { app -> _hero.value = Hero(app.pkg, app.label, userHero(app.pkg), app.accent) }
+        }
+    }
 
-    fun onFocus(app: AppEntry, inTopRow: Boolean) {
-        _focusInTopRow.value = inTopRow
-        // tvOS-style: only the top row drives the big background
-        if (inTopRow) focusedApp.value = app
+    fun onFocus(app: AppEntry, row: Int) {
+        lastFocusedPkg = app.pkg
+        _focusRow.value = row
+        if (row == DOCK_ROW) topRowApp.value = app
+    }
+
+    fun requestRestore() {
+        _restoreTick.value++
     }
 
     fun setImmersive(on: Boolean) {
@@ -92,12 +127,37 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
     fun goHome() {
         _immersive.value = false
+        lastFocusedPkg = null
         _homeTick.value++
     }
 
-    // ------------------------------------------------------------------ editing
+    // ------------------------------------------------------------------ images
 
-    fun isFavorite(pkg: String) = state.value.favorites.any { it.pkg == pkg }
+    private fun userHero(pkg: String): ImageBitmap? {
+        heroCache.get(pkg)?.let { return it }
+        val dir = getApplication<Application>().getExternalFilesDir("hero") ?: return null
+        val img = findImage(dir, pkg)?.let { decode(it) } ?: return null
+        heroCache.put(pkg, img)
+        return img
+    }
+
+    private fun findImage(dir: File, name: String): File? =
+        listOf("jpg", "jpeg", "png", "webp").map { File(dir, "$name.$it") }.firstOrNull { it.isFile }
+
+    /** Decodes at most ~1280 px wide in RGB_565 to keep memory low on the TV. */
+    private fun decode(f: File): ImageBitmap? = runCatching {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(f.path, bounds)
+        var sample = 1
+        while (bounds.outWidth / (sample * 2) >= 1280) sample *= 2
+        val opts = BitmapFactory.Options().apply {
+            inSampleSize = sample
+            inPreferredConfig = Bitmap.Config.RGB_565
+        }
+        BitmapFactory.decodeFile(f.path, opts)?.asImageBitmap()
+    }.getOrNull()
+
+    // ------------------------------------------------------------------ editing
 
     fun toggleFavorite(pkg: String) = edit { favs, others ->
         if (favs.remove(pkg)) others.add(0, pkg) else {
@@ -137,6 +197,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     companion object {
+        const val TAG = "SmartTV"
         val DEFAULT_FAVORITES = listOf(
             "com.google.android.youtube.tv", "com.netflix.ninja", "com.disney.disneyplus",
             "com.amazon.amazonvideo.livingroom", "com.apple.atve.androidtv.appletv",

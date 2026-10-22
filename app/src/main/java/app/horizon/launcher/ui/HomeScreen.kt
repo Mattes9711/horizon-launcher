@@ -9,8 +9,8 @@ import android.text.format.DateFormat
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.Crossfade
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -31,15 +31,15 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -54,14 +54,20 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -76,99 +82,120 @@ private const val COLUMNS = 6
 private val SidePadding = 40.dp
 private val TileGap = 22.dp
 
+// Fixed geometry, so the page can be positioned exactly (no automatic scrolling that can jump).
+private val DockHeight = 18.dp + TileHeight + TileLabelHeight + 6.dp
+private val RowHeight = 18.dp + TileHeight + TileLabelHeight
+private val RowPeek = 50.dp      // how much of the 2nd row shows below the dock in hero mode
+private val GridTop = 64.dp      // dock position when browsing the grid (below the clock)
+
 @Composable
 fun HomeScreen(vm: HomeViewModel) {
     val context = LocalContext.current
+    val density = LocalDensity.current
     val state by vm.state.collectAsStateWithLifecycle()
     val immersive by vm.immersive.collectAsStateWithLifecycle()
+    val focusRow by vm.focusRow.collectAsStateWithLifecycle()
     val homeTick by vm.homeTick.collectAsStateWithLifecycle()
+    val restoreTick by vm.restoreTick.collectAsStateWithLifecycle()
 
     var menuFor by remember { mutableStateOf<AppEntry?>(null) }
     // focus requests: (package, counter) - every tile checks if it is the target
     var focusTarget by remember { mutableStateOf<String?>(null) }
     var focusTick by remember { mutableIntStateOf(0) }
     fun requestFocusOn(pkg: String?) {
-        focusTarget = pkg; focusTick++
+        focusTarget = pkg ?: (state.favorites.firstOrNull() ?: state.others.firstOrNull())?.pkg
+        focusTick++
     }
 
-    val listState = rememberLazyListState()
     val tilesEnabled = !immersive && menuFor == null
+    val atTop = focusRow == DOCK_ROW
+    val heroSpace = LocalConfiguration.current.screenHeightDp.dp - DockHeight - RowPeek
 
-    // first load and every Home press: jump to the first favourite
-    LaunchedEffect(state.loaded, homeTick) {
-        if (state.loaded) {
-            listState.scrollToItem(0)
-            requestFocusOn((state.favorites.firstOrNull() ?: state.others.firstOrNull())?.pkg)
+    // Page position: hero mode (dock low, big artwork) or grid mode (dock at the top, page slides up).
+    val scroll = remember { Animatable(0f) }
+    LaunchedEffect(focusRow, heroSpace) {
+        val target = with(density) {
+            when {
+                focusRow == DOCK_ROW -> 0f
+                focusRow <= 1 -> (heroSpace - GridTop).toPx()
+                else -> (heroSpace - GridTop + RowHeight * (focusRow - 1)).toPx()
+            }
         }
+        scroll.animateTo(target, spring(dampingRatio = 0.86f, stiffness = 260f))
+    }
+
+    // first load and every Home press: back to the first favourite
+    LaunchedEffect(state.loaded, homeTick) {
+        if (state.loaded) requestFocusOn(null)
+    }
+    // window regained focus or the app list was reloaded: put focus back where it was
+    LaunchedEffect(restoreTick) {
+        if (state.loaded) requestFocusOn(vm.lastFocusedPkg)
     }
 
     BackHandler(enabled = true) { vm.goHome() }
 
-    Box(Modifier.fillMaxSize().background(Color(0xFF07080C))) {
-        // Background and shade read their own state, so a focus change does not recompose the grid.
-        HeroBackground(vm)
-        Shade(vm, immersive)
+    Box(Modifier.fillMaxSize().background(Color(0xFF0B0D12))) {
+        WallpaperLayer(vm)
+        HeroLayer(vm, visible = atTop || immersive)
 
-        val gridAlpha by animateFloatAsState(if (immersive) 0f else 1f, spring(stiffness = Spring.StiffnessLow), label = "gridAlpha")
-        val gridShift by animateDpAsState(if (immersive) 140.dp else 0.dp, spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessLow), label = "gridShift")
-
-        LazyColumn(
-            state = listState,
-            contentPadding = PaddingValues(bottom = 80.dp),
+        val pageAlpha by animateFloatAsState(if (immersive) 0f else 1f, tween(350), label = "pageAlpha")
+        Column(
             modifier = Modifier
                 .fillMaxSize()
+                .wrapContentHeight(align = Alignment.Top, unbounded = true)
                 .graphicsLayer {
-                    alpha = gridAlpha
-                    translationY = gridShift.toPx()
+                    translationY = -scroll.value
+                    alpha = pageAlpha
                 },
         ) {
-            item(key = "hero-space") { Spacer(Modifier.height(292.dp)) }
+            Spacer(Modifier.height(heroSpace))
 
-            item(key = "dock") {
-                Dock {
-                    LazyRow(
-                        contentPadding = PaddingValues(horizontal = 16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(TileGap),
-                    ) {
-                        items(state.favorites, key = { it.pkg }) { app ->
+            Dock(glassy = !atTop) {
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(TileGap),
+                ) {
+                    items(state.favorites, key = { it.pkg }) { app ->
+                        TileWithFocus(
+                            app = app, target = focusTarget, tick = focusTick, enabled = tilesEnabled,
+                            onFocused = { vm.onFocus(app, DOCK_ROW) },
+                            onOpen = { launch(context, app) },
+                            onMenu = { menuFor = app },
+                            onUp = { vm.setImmersive(true); true },
+                        )
+                    }
+                }
+            }
+
+            state.others.chunked(COLUMNS).forEachIndexed { rowIndex, rowApps ->
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(TileGap),
+                    modifier = Modifier.padding(start = SidePadding, end = SidePadding, top = 18.dp),
+                ) {
+                    rowApps.forEach { app ->
+                        key(app.pkg) {
                             TileWithFocus(
                                 app = app, target = focusTarget, tick = focusTick, enabled = tilesEnabled,
-                                onFocused = { vm.onFocus(app, inTopRow = true) },
+                                onFocused = { vm.onFocus(app, rowIndex) },
                                 onOpen = { launch(context, app) },
                                 onMenu = { menuFor = app },
-                                onUp = { vm.setImmersive(true); true },
                             )
                         }
                     }
                 }
             }
-
-            val rows = state.others.chunked(COLUMNS)
-            items(rows.size, key = { "row$it" }) { index ->
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(TileGap),
-                    modifier = Modifier.padding(start = SidePadding, end = SidePadding, top = 26.dp),
-                ) {
-                    rows[index].forEach { app ->
-                        TileWithFocus(
-                            app = app, target = focusTarget, tick = focusTick, enabled = tilesEnabled,
-                            onFocused = { vm.onFocus(app, inTopRow = false) },
-                            onOpen = { launch(context, app) },
-                            onMenu = { menuFor = app },
-                        )
-                    }
-                }
-            }
+            Spacer(Modifier.height(120.dp))
         }
 
         StatusPill(Modifier.align(Alignment.TopEnd).padding(top = 28.dp, end = 40.dp))
 
         if (immersive) {
             ImmersiveLayer(
-                title = state.favorites.firstOrNull { it.pkg == vm.focusedPkg }?.label.orEmpty(),
+                title = "",
                 onExit = {
                     vm.setImmersive(false)
-                    requestFocusOn(vm.focusedPkg)
+                    requestFocusOn(vm.lastFocusedPkg)
                 },
             )
         }
@@ -219,64 +246,124 @@ private fun TileWithFocus(
     AppTile(app, requester, enabled, onFocused, onOpen, onMenu, onUp)
 }
 
-/** The translucent "glass" shelf behind the top row (real blur needs Android 12+, so it is tinted glass). */
+/** Glass shelf behind the top row: dark glass over artwork, light frosted glass over the wallpaper. */
 @Composable
-private fun Dock(content: @Composable () -> Unit) {
+private fun Dock(glassy: Boolean, content: @Composable () -> Unit) {
     val shape = RoundedCornerShape(28.dp)
+    val fill by animateColorAsState(
+        if (glassy) Color.White.copy(alpha = 0.38f) else Color(0xFF15171C).copy(alpha = 0.42f), tween(400), label = "dockFill"
+    )
+    val edge by animateColorAsState(
+        if (glassy) Color.White.copy(alpha = 0.55f) else Color.White.copy(alpha = 0.10f), tween(400), label = "dockEdge"
+    )
     Box(
         Modifier
             .fillMaxWidth()
             .padding(horizontal = 24.dp)
-            .background(Color.White.copy(alpha = 0.10f), shape)
-            .border(1.dp, Color.White.copy(alpha = 0.14f), shape)
-            .padding(top = 18.dp, bottom = 4.dp)
+            .height(DockHeight)
+            .background(fill, shape)
+            .border(1.dp, edge, shape)
+            .padding(top = 18.dp)
     ) { content() }
 }
 
+/** Calm wallpaper behind the grid - the same for every app. A pushed image (tv.sh wallpaper) replaces it. */
 @Composable
-private fun Shade(vm: HomeViewModel, immersive: Boolean) {
-    val inTopRow by vm.focusInTopRow.collectAsStateWithLifecycle()
-    // darker while browsing the lower rows
-    val shade by animateFloatAsState(if (inTopRow || immersive) 0f else 0.45f, tween(400), label = "shade")
-    Box(
-        Modifier
-            .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    0f to Color.Black.copy(alpha = 0.30f),
-                    0.38f to Color.Transparent,
-                    1f to Color.Black.copy(alpha = 0.92f),
+private fun WallpaperLayer(vm: HomeViewModel) {
+    val wallpaper by vm.wallpaper.collectAsStateWithLifecycle()
+    val image = wallpaper
+    if (image != null) {
+        Image(image, null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+    } else {
+        Canvas(Modifier.fillMaxSize()) {
+            drawRect(Color(0xFFE3E9F0))
+            blob(0.18f, 0.22f, 0.75f, Color(0xFFB5D2EE))
+            blob(0.88f, 0.18f, 0.55f, Color(0xFFF2E1C9))
+            blob(0.62f, 0.95f, 0.65f, Color(0xFFCFDDEB))
+            blob(0.05f, 0.95f, 0.45f, Color(0xFFEDE3D6))
+        }
+    }
+    // keep white labels readable on the light wallpaper
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.10f)))
+}
+
+/** Full-screen artwork for the focused top-row app, with its name like a title card. */
+@Composable
+private fun HeroLayer(vm: HomeViewModel, visible: Boolean) {
+    val hero by vm.hero.collectAsStateWithLifecycle()
+    val alpha by animateFloatAsState(if (visible) 1f else 0f, tween(450), label = "heroAlpha")
+    if (alpha == 0f) return
+    Box(Modifier.fillMaxSize().graphicsLayer { this.alpha = alpha }) {
+        Crossfade(targetState = hero, animationSpec = tween(600), label = "hero") { h ->
+            Box(Modifier.fillMaxSize()) {
+                val image = h?.image
+                if (image != null) {
+                    Image(image, null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                } else {
+                    GeneratedArt(h?.accent ?: Color(0xFF3A4C78))
+                }
+                // darker bottom so the dock reads well, light top for the title
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                0f to Color.Black.copy(alpha = 0.35f),
+                                0.35f to Color.Transparent,
+                                0.6f to Color.Transparent,
+                                1f to Color.Black.copy(alpha = 0.55f),
+                            )
+                        )
                 )
-            )
-            .background(Color.Black.copy(alpha = shade))
+                Text(
+                    text = h?.title.orEmpty(),
+                    color = Color.White,
+                    fontSize = 56.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    maxLines = 1,
+                    style = TextStyle(shadow = Shadow(Color.Black.copy(alpha = 0.45f), Offset(0f, 4f), 18f)),
+                    modifier = Modifier.padding(start = 56.dp, top = 40.dp),
+                )
+            }
+        }
+    }
+}
+
+/** Original soft "aurora" artwork in the app's own colours (used until real content art exists). */
+@Composable
+private fun GeneratedArt(accent: Color) {
+    val palette = remember(accent) { auroraPalette(accent) }
+    Canvas(Modifier.fillMaxSize()) {
+        drawRect(palette[0])
+        blob(0.22f, 0.30f, 0.80f, palette[1])
+        blob(0.85f, 0.15f, 0.60f, palette[2])
+        blob(0.70f, 0.85f, 0.70f, palette[3])
+    }
+}
+
+private fun auroraPalette(accent: Color): List<Color> {
+    val out = FloatArray(3)
+    android.graphics.Color.colorToHSV(accent.toArgb(), out)
+    fun hsv(h: Float, s: Float, v: Float) =
+        Color(android.graphics.Color.HSVToColor(floatArrayOf((h + 360f) % 360f, s.coerceIn(0f, 1f), v.coerceIn(0f, 1f))))
+    val h = out[0]
+    val s = out[1].coerceAtLeast(0.35f)
+    return listOf(
+        hsv(h, s * 0.9f, 0.22f),           // deep base
+        hsv(h, s, 0.85f),                  // main colour
+        hsv(h + 35f, s * 0.7f, 0.95f),     // warm neighbour
+        hsv(h - 40f, s * 0.8f, 0.60f),     // cool neighbour
     )
 }
 
-@Composable
-private fun HeroBackground(vm: HomeViewModel) {
-    val backdrop by vm.backdrop.collectAsStateWithLifecycle()
-    Crossfade(targetState = backdrop, animationSpec = tween(550), label = "hero") { b ->
-        when {
-            b == null -> Box(Modifier.fillMaxSize())
-            b.image != null -> Image(
-                bitmap = b.image,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
-            )
-            else -> Box(
-                Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.radialGradient(
-                            listOf(b.accent.copy(alpha = 0.9f), Color(0xFF07080C)),
-                            center = Offset(500f, 200f),
-                            radius = 1400f,
-                        )
-                    )
-            )
-        }
-    }
+private fun DrawScope.blob(cx: Float, cy: Float, r: Float, color: Color) {
+    val center = Offset(size.width * cx, size.height * cy)
+    val radius = size.width * r
+    drawCircle(
+        Brush.radialGradient(listOf(color, color.copy(alpha = 0f)), center = center, radius = radius),
+        radius = radius,
+        center = center,
+    )
 }
 
 @Composable

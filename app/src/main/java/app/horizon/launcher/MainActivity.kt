@@ -39,6 +39,17 @@ class MainActivity : ComponentActivity() {
         setContent { HomeScreen(vm) }
     }
 
+    override fun onResume() {
+        super.onResume()
+        vm.refreshImages()
+    }
+
+    /** Coming back from an app, a dialog or the screensaver: put focus back on the last tile. */
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) vm.requestRestore()
+    }
+
     /** Home pressed while the launcher is already in front. */
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)

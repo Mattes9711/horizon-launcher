@@ -14,6 +14,7 @@ import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -34,7 +35,9 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -70,6 +73,7 @@ object Motion {
 
 val TileWidth = 128.dp
 val TileHeight = 80.dp
+val TileLabelHeight = 30.dp
 private val TileShape = RoundedCornerShape(14.dp)
 
 internal fun Key.isOk() = this == Key.DirectionCenter || this == Key.Enter || this == Key.NumPadEnter
@@ -92,7 +96,7 @@ fun AppTile(
     val scale by animateFloatAsState(
         if (focused) 1.1f else 1f, spring(dampingRatio = 0.62f, stiffness = 420f), label = "scale"
     )
-    val dim by animateFloatAsState(if (focused) 0f else 0.28f, tween(220), label = "dim")
+    val dim by animateFloatAsState(if (focused) 0f else 0.16f, tween(220), label = "dim")
     val labelAlpha by animateFloatAsState(if (focused) 1f else 0f, tween(200), label = "label")
     val elevation by animateDpAsState(if (focused) 10.dp else 0.dp, spring(stiffness = Spring.StiffnessMediumLow), label = "lift")
     val tiltX = remember { Animatable(0f) }
@@ -198,7 +202,8 @@ fun AppTile(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
-            modifier = Modifier.padding(top = 12.dp),
+            style = TextStyle(shadow = Shadow(Color.Black.copy(alpha = 0.6f), Offset(0f, 1.5f), 6f)),
+            modifier = Modifier.height(TileLabelHeight).padding(top = 12.dp),
         )
     }
 }
