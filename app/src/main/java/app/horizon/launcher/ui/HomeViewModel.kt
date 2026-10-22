@@ -66,7 +66,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
                 delay(140) // don't rebuild the background while the user scrolls fast
                 val image = app.source?.let { src ->
                     blurCache.get(app.pkg) ?: withContext(Dispatchers.Default) {
-                        AppRepository.blurred(src)
+                        AppRepository.backdropFrom(src)
                     }.also { blurCache.put(app.pkg, it) }
                 }
                 _backdrop.value = Backdrop(app.pkg, image, app.accent)

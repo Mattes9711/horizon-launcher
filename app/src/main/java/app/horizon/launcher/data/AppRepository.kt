@@ -25,8 +25,8 @@ data class AppEntry(
     val icon: ImageBitmap?,
     /** Average colour of the artwork, used for fallback tiles and backgrounds. */
     val accent: Color,
-    /** Small Android bitmap used to build the blurred hero background. */
-    internal val source: Bitmap?,
+    /** Original banner drawable, rendered at higher resolution for the hero background. */
+    internal val source: Drawable?,
 )
 
 class AppRepository(private val context: Context) {
@@ -74,17 +74,11 @@ class AppRepository(private val context: Context) {
             banner = banner?.asImageBitmap(),
             icon = icon?.asImageBitmap(),
             accent = accent,
-            source = banner,
+            source = if (banner != null) bannerD else null,
         )
     }
 
-    private fun render(d: Drawable, w: Int, h: Int): Bitmap {
-        val copy = d.constantState?.newDrawable()?.mutate() ?: d
-        val b = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        copy.setBounds(0, 0, w, h)
-        copy.draw(Canvas(b))
-        return b
-    }
+    private fun render(d: Drawable, w: Int, h: Int): Bitmap = renderDrawable(d, w, h)
 
     private fun averageColor(b: Bitmap): Color {
         val px = Bitmap.createScaledBitmap(b, 1, 1, true).getPixel(0, 0)
@@ -94,15 +88,51 @@ class AppRepository(private val context: Context) {
     }
 
     companion object {
+        fun renderDrawable(d: Drawable, w: Int, h: Int): Bitmap {
+            val copy = d.constantState?.newDrawable()?.mutate() ?: d
+            val b = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            copy.setBounds(0, 0, w, h)
+            copy.draw(Canvas(b))
+            return b
+        }
+
+        /** Hero background: banner at 480x270, lightly blurred. */
+        fun backdropFrom(d: Drawable): ImageBitmap = blurred(renderDrawable(d, 480, 270), radius = 2, passes = 2)
+
         /**
-         * Cheap blur that runs fine on weak TV GPUs (Android 11 has no RenderEffect):
-         * shrink to a few pixels, then scale back up with bilinear filtering.
+         * Light blur for the hero background: the art stays recognisable, just soft.
+         * Two passes of a small box blur on the 256x144 banner (≈ gaussian), done on the CPU
+         * because Android 11 has no RenderEffect. The upscale to full screen adds extra softness.
          */
-        fun blurred(src: Bitmap): ImageBitmap {
-            val tiny = Bitmap.createScaledBitmap(src, 32, 18, true)
-            val mid = Bitmap.createScaledBitmap(tiny, 96, 54, true)
-            val small = Bitmap.createScaledBitmap(mid, 24, 14, true)
-            return Bitmap.createScaledBitmap(small, 320, 180, true).asImageBitmap()
+        fun blurred(src: Bitmap, radius: Int = 1, passes: Int = 2): ImageBitmap {
+            val w = src.width
+            val h = src.height
+            val a = IntArray(w * h)
+            val b = IntArray(w * h)
+            src.getPixels(a, 0, w, 0, 0, w, h)
+            repeat(passes) {
+                boxBlur(a, b, w, h, radius, horizontal = true)
+                boxBlur(b, a, w, h, radius, horizontal = false)
+            }
+            return Bitmap.createBitmap(a, w, h, Bitmap.Config.ARGB_8888).asImageBitmap()
+        }
+
+        private fun boxBlur(src: IntArray, dst: IntArray, w: Int, h: Int, r: Int, horizontal: Boolean) {
+            val outer = if (horizontal) h else w
+            val inner = if (horizontal) w else h
+            for (o in 0 until outer) {
+                for (i in 0 until inner) {
+                    var sa = 0; var sr = 0; var sg = 0; var sb = 0; var n = 0
+                    for (k in -r..r) {
+                        val j = (i + k).coerceIn(0, inner - 1)
+                        val p = if (horizontal) src[o * w + j] else src[j * w + o]
+                        sa += p ushr 24; sr += (p shr 16) and 0xFF; sg += (p shr 8) and 0xFF; sb += p and 0xFF
+                        n++
+                    }
+                    val idx = if (horizontal) o * w + i else i * w + o
+                    dst[idx] = ((sa / n) shl 24) or ((sr / n) shl 16) or ((sg / n) shl 8) or (sb / n)
+                }
+            }
         }
     }
 }

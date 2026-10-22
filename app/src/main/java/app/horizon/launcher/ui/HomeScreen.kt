@@ -47,6 +47,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -79,9 +80,7 @@ private val TileGap = 22.dp
 fun HomeScreen(vm: HomeViewModel) {
     val context = LocalContext.current
     val state by vm.state.collectAsStateWithLifecycle()
-    val backdrop by vm.backdrop.collectAsStateWithLifecycle()
     val immersive by vm.immersive.collectAsStateWithLifecycle()
-    val inTopRow by vm.focusInTopRow.collectAsStateWithLifecycle()
     val homeTick by vm.homeTick.collectAsStateWithLifecycle()
 
     var menuFor by remember { mutableStateOf<AppEntry?>(null) }
@@ -106,22 +105,9 @@ fun HomeScreen(vm: HomeViewModel) {
     BackHandler(enabled = true) { vm.goHome() }
 
     Box(Modifier.fillMaxSize().background(Color(0xFF07080C))) {
-        HeroBackground(backdrop)
-
-        // soft gradient into the grid; darker while browsing the lower rows
-        val shade by animateFloatAsState(if (inTopRow || immersive) 0f else 0.45f, tween(400), label = "shade")
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        0f to Color.Black.copy(alpha = 0.30f),
-                        0.38f to Color.Transparent,
-                        1f to Color.Black.copy(alpha = 0.92f),
-                    )
-                )
-                .background(Color.Black.copy(alpha = shade))
-        )
+        // Background and shade read their own state, so a focus change does not recompose the grid.
+        HeroBackground(vm)
+        Shade(vm, immersive)
 
         val gridAlpha by animateFloatAsState(if (immersive) 0f else 1f, spring(stiffness = Spring.StiffnessLow), label = "gridAlpha")
         val gridShift by animateDpAsState(if (immersive) 140.dp else 0.dp, spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessLow), label = "gridShift")
@@ -179,7 +165,7 @@ fun HomeScreen(vm: HomeViewModel) {
 
         if (immersive) {
             ImmersiveLayer(
-                title = state.favorites.firstOrNull { it.pkg == backdrop?.pkg }?.label.orEmpty(),
+                title = state.favorites.firstOrNull { it.pkg == vm.focusedPkg }?.label.orEmpty(),
                 onExit = {
                     vm.setImmersive(false)
                     requestFocusOn(vm.focusedPkg)
@@ -248,7 +234,27 @@ private fun Dock(content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun HeroBackground(backdrop: Backdrop?) {
+private fun Shade(vm: HomeViewModel, immersive: Boolean) {
+    val inTopRow by vm.focusInTopRow.collectAsStateWithLifecycle()
+    // darker while browsing the lower rows
+    val shade by animateFloatAsState(if (inTopRow || immersive) 0f else 0.45f, tween(400), label = "shade")
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(
+                Brush.verticalGradient(
+                    0f to Color.Black.copy(alpha = 0.30f),
+                    0.38f to Color.Transparent,
+                    1f to Color.Black.copy(alpha = 0.92f),
+                )
+            )
+            .background(Color.Black.copy(alpha = shade))
+    )
+}
+
+@Composable
+private fun HeroBackground(vm: HomeViewModel) {
+    val backdrop by vm.backdrop.collectAsStateWithLifecycle()
     Crossfade(targetState = backdrop, animationSpec = tween(550), label = "hero") { b ->
         when {
             b == null -> Box(Modifier.fillMaxSize())
@@ -296,7 +302,8 @@ private fun StatusPill(modifier: Modifier) {
         Canvas(
             Modifier
                 .size(26.dp)
-                .background(Color(0xFF6B7AA6), CircleShape)
+                .clip(CircleShape)
+                .background(Color(0xFF6B7AA6))
         ) {
             val w = size.width
             drawCircle(Color.White.copy(alpha = 0.92f), radius = w * 0.2f, center = Offset(w / 2, w * 0.38f))

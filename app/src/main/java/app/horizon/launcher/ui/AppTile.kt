@@ -94,7 +94,7 @@ fun AppTile(
     )
     val dim by animateFloatAsState(if (focused) 0f else 0.28f, tween(220), label = "dim")
     val labelAlpha by animateFloatAsState(if (focused) 1f else 0f, tween(200), label = "label")
-    val elevation by animateDpAsState(if (focused) 20.dp else 0.dp, spring(stiffness = Spring.StiffnessMediumLow), label = "lift")
+    val elevation by animateDpAsState(if (focused) 10.dp else 0.dp, spring(stiffness = Spring.StiffnessMediumLow), label = "lift")
     val tiltX = remember { Animatable(0f) }
     val tiltY = remember { Animatable(0f) }
     val sheen = remember { Animatable(-1f) }
@@ -104,7 +104,7 @@ fun AppTile(
             val tiltSpring = spring<Float>(dampingRatio = 0.42f, stiffness = 90f)
             launch { tiltY.snapTo(Motion.dx * 8f); tiltY.animateTo(0f, tiltSpring) }
             launch { tiltX.snapTo(-Motion.dy * 8f); tiltX.animateTo(0f, tiltSpring) }
-            launch { sheen.snapTo(-0.6f); sheen.animateTo(1.6f, tween(950, easing = FastOutSlowInEasing)) }
+            launch { sheen.snapTo(-0.6f); sheen.animateTo(1.6f, tween(700, easing = FastOutSlowInEasing)) }
         }
     }
 
