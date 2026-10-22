@@ -13,6 +13,7 @@ import app.horizon.launcher.data.AppEntry
 import app.horizon.launcher.data.AppRepository
 import app.horizon.launcher.data.LayoutStore
 import app.horizon.launcher.data.RecentApps
+import app.horizon.launcher.data.INPUT_PREFIX
 import app.horizon.launcher.data.SETTINGS_ID
 import app.horizon.launcher.data.SavedLayout
 import app.horizon.launcher.data.ShelfRepository
@@ -35,6 +36,8 @@ import kotlinx.coroutines.withContext
 data class HomeState(
     val favorites: List<AppEntry> = emptyList(),
     val others: List<AppEntry> = emptyList(),
+    /** Apps kept off the home screen ("Weitere Apps", yellow key). */
+    val drawer: List<AppEntry> = emptyList(),
     val hiddenCount: Int = 0,
     val loaded: Boolean = false,
 )
@@ -69,6 +72,26 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     }.stateIn(viewModelScope, SharingStarted.Eagerly, HomeState())
 
     private var hiddenNow: Set<String> = emptySet()
+    private var pinnedNow: Set<String> = emptySet()
+
+    private val _drawer = MutableStateFlow(false)
+    val drawer: StateFlow<Boolean> = _drawer.asStateFlow()
+
+    fun toggleDrawer() {
+        _controlCenter.value = false
+        _switcher.value = null
+        _drawer.value = !_drawer.value
+        if (!_drawer.value) _restoreTick.value++
+    }
+
+    fun closeDrawer() {
+        if (_drawer.value) toggleDrawer()
+    }
+
+    /** Puts a drawer app on the home screen. */
+    fun showOnHome(pkg: String) {
+        viewModelScope.launch { store.setHidden(hiddenNow - pkg, pinnedNow + pkg) }
+    }
 
     // ------------------------------------------------------------------ focus / page
     private val topRowApp = MutableStateFlow<AppEntry?>(null)
@@ -255,6 +278,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         _controlCenter.value = false
         _switcher.value = null
         _editing.value = null
+        _drawer.value = false
         lastFocusedPkg = null
         _homeTick.value++
     }
@@ -274,9 +298,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { store.setSounds(on) }
     }
 
-    fun unhideAll() {
-        viewModelScope.launch { store.setHidden(emptySet()) }
-    }
+
 
     // ------------------------------------------------------------------ app switcher
     fun toggleSwitcher() {
@@ -329,7 +351,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             when (dir) {
                 Dir.LEFT -> if (i > 0) { favs.removeAt(i); favs.add(i - 1, pkg) }
                 Dir.RIGHT -> if (i < favs.size - 1) { favs.removeAt(i); favs.add(i + 1, pkg) }
-                Dir.DOWN -> { favs.removeAt(i); others.add(i.coerceAtMost(others.size), pkg) }
+                Dir.DOWN -> { favs.removeAt(i); others.add(i.coerceAtMost(others.size), pkg); keepOnHome(pkg) }
                 Dir.UP -> Unit
             }
         } else {
@@ -348,13 +370,22 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun toggleFavorite(pkg: String) = edit { favs, others ->
-        if (favs.remove(pkg)) others.add(0, pkg) else {
+        if (favs.remove(pkg)) {
+            others.add(0, pkg)
+            keepOnHome(pkg)
+        } else {
             others.remove(pkg); favs.add(pkg)
         }
     }
 
+    /** An app leaving the top row stays on the home screen even without a TV banner. */
+    private fun keepOnHome(pkg: String) {
+        if (pkg !in pinnedNow) viewModelScope.launch { store.setHidden(hiddenNow, pinnedNow + pkg) }
+    }
+
+    /** Moves an app into "Weitere Apps". */
     fun hide(pkg: String) {
-        viewModelScope.launch { store.setHidden(hiddenNow + pkg) }
+        viewModelScope.launch { store.setHidden(hiddenNow + pkg, pinnedNow - pkg) }
         edit { favs, others -> favs.remove(pkg); others.remove(pkg) }
     }
 
@@ -368,7 +399,14 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun arrange(list: List<AppEntry>, layout: SavedLayout): HomeState {
         hiddenNow = layout.hidden
-        val visible = list.filter { it.pkg !in layout.hidden }
+        pinnedNow = layout.pinned
+        val favSet = (layout.favorites ?: DEFAULT_FAVORITES).toSet()
+        // Home shows only apps that look good on a TV: real TV banner, HDMI inputs, or explicitly pinned.
+        // Everything else (Android helpers, file managers, ...) lives in "Weitere Apps".
+        fun onHome(a: AppEntry) = a.pkg != SETTINGS_ID && a.pkg !in layout.hidden &&
+            (a.banner != null && a.icon == null || a.pkg.startsWith(INPUT_PREFIX) || a.pkg in layout.pinned || a.pkg in favSet)
+        val visible = list.filter { onHome(it) }
+        val drawer = list.filter { !onHome(it) }.sortedWith(compareBy<AppEntry>({ it.pkg == SETTINGS_ID }, { it.label.lowercase() }))
         val byPkg = visible.associateBy { it.pkg }
         var favIds = (layout.favorites ?: DEFAULT_FAVORITES).filter { it in byPkg && it != SETTINGS_ID }.distinct()
         if (layout.favorites == null && favIds.isEmpty()) {
@@ -378,9 +416,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         val others = visible
             .filter { it.pkg !in favIds && it.pkg != SETTINGS_ID }
             .sortedWith(compareBy<AppEntry>({ rank[it.pkg] ?: Int.MAX_VALUE }, { it.label.lowercase() }))
-        val settings = listOfNotNull(byPkg[SETTINGS_ID])
-        val hiddenCount = list.count { it.pkg in layout.hidden }
-        return HomeState(favIds.mapNotNull { byPkg[it] }, others + settings, hiddenCount, loaded = true)
+        return HomeState(favIds.mapNotNull { byPkg[it] }, others, drawer, drawer.size, loaded = true)
     }
 
     companion object {

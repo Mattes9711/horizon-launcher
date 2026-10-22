@@ -136,13 +136,12 @@ fun ControlCenter(vm: HomeViewModel, hiddenCount: Int, onClose: () -> Unit) {
                 CcButton(Glyph.WIFI, if (online) "WLAN\nverbunden" else "WLAN\noffline", Modifier.weight(1f)) {
                     onClose(); open(context, Intent(Settings.ACTION_WIFI_SETTINGS))
                 }
-            }
                 CcButton(Glyph.NOTE, "Klicktöne", Modifier.weight(1f), active = sounds) { vm.setSounds(!sounds) }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 CcButton(Glyph.PHOTO, "Foto des\nTages", Modifier.weight(1f), active = bing) { vm.setBing(!bing) }
-                CcButton(Glyph.EYE, if (hiddenCount > 0) "$hiddenCount Apps\neinblenden" else "Keine aus-\ngeblendet", Modifier.weight(1f)) {
-                    vm.unhideAll()
+                CcButton(Glyph.EYE, if (hiddenCount > 0) "Weitere Apps\n($hiddenCount)" else "Weitere\nApps", Modifier.weight(1f)) {
+                    vm.closeControlCenter(); vm.toggleDrawer()
                 }
                 CcButton(Glyph.GEAR, "Einstellungen", Modifier.weight(1f)) {
                     onClose(); open(context, Intent(Settings.ACTION_SETTINGS))

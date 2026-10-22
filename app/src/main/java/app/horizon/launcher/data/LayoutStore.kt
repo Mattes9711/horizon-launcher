@@ -13,13 +13,14 @@ import kotlinx.coroutines.flow.map
 private val Context.layoutDataStore: DataStore<Preferences> by preferencesDataStore(name = "layout")
 
 /** Saved home-screen layout: top row, order of everything else, hidden apps. */
-data class SavedLayout(val favorites: List<String>?, val order: List<String>, val hidden: Set<String>)
+data class SavedLayout(val favorites: List<String>?, val order: List<String>, val hidden: Set<String>, val pinned: Set<String>)
 
 class LayoutStore(private val context: Context) {
 
     private val favKey = stringPreferencesKey("favorites")
     private val orderKey = stringPreferencesKey("order")
     private val hiddenKey = stringPreferencesKey("hidden")
+    private val pinnedKey = stringPreferencesKey("pinned")
     private val soundsKey = booleanPreferencesKey("sounds")
     private val bingKey = booleanPreferencesKey("bing")
 
@@ -28,6 +29,7 @@ class LayoutStore(private val context: Context) {
             favorites = p[favKey]?.let { split(it) } ?: legacyFavorites(),
             order = p[orderKey]?.let { split(it) } ?: emptyList(),
             hidden = p[hiddenKey]?.let { split(it).toSet() } ?: emptySet(),
+            pinned = p[pinnedKey]?.let { split(it).toSet() } ?: emptySet(),
         )
     }
 
@@ -43,8 +45,11 @@ class LayoutStore(private val context: Context) {
         }
     }
 
-    suspend fun setHidden(hidden: Set<String>) {
-        context.layoutDataStore.edit { it[hiddenKey] = hidden.joinToString(",") }
+    suspend fun setHidden(hidden: Set<String>, pinned: Set<String>) {
+        context.layoutDataStore.edit {
+            it[hiddenKey] = hidden.joinToString(",")
+            it[pinnedKey] = pinned.joinToString(",")
+        }
     }
 
     suspend fun setBing(on: Boolean) {

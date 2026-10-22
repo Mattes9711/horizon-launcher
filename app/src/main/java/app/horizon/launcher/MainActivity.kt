@@ -77,13 +77,13 @@ class MainActivity : ComponentActivity() {
             Log.d(HomeViewModel.TAG, "key ${KeyEvent.keyCodeToString(event.keyCode)} repeat=${event.repeatCount}")
         }
         when (event.keyCode) {
-            // blue: Control Center, yellow: recently used apps
+            // blue: Control Center, yellow: "Weitere Apps" (everything kept off the home screen)
             KeyEvent.KEYCODE_PROG_BLUE -> {
                 if (event.action == KeyEvent.ACTION_UP) vm.toggleControlCenter()
                 return true
             }
             KeyEvent.KEYCODE_PROG_YELLOW -> {
-                if (event.action == KeyEvent.ACTION_UP) vm.toggleSwitcher()
+                if (event.action == KeyEvent.ACTION_UP) vm.toggleDrawer()
                 return true
             }
         }

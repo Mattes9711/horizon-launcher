@@ -33,6 +33,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -100,6 +103,7 @@ fun HomeScreen(vm: HomeViewModel) {
     val controlCenter by vm.controlCenter.collectAsStateWithLifecycle()
     val switcher by vm.switcher.collectAsStateWithLifecycle()
     val editing by vm.editing.collectAsStateWithLifecycle()
+    val drawerOpen by vm.drawer.collectAsStateWithLifecycle()
 
     var menuFor by remember { mutableStateOf<AppEntry?>(null) }
     // focus requests: every tile checks whether it is the target when the counter changes
@@ -110,7 +114,7 @@ fun HomeScreen(vm: HomeViewModel) {
         focusTick++
     }
 
-    val tilesEnabled = !immersive && menuFor == null && !controlCenter && switcher == null
+    val tilesEnabled = !immersive && menuFor == null && !controlCenter && switcher == null && !drawerOpen
     val heroSpace = LocalConfiguration.current.screenHeightDp.dp - DockHeight - RowPeek
 
     // Page position, animated from a coroutine: changing rows never recomposes the grid.
@@ -202,16 +206,30 @@ fun HomeScreen(vm: HomeViewModel) {
             ControlCenter(vm, hiddenCount = state.hiddenCount, onClose = { vm.closeControlCenter() })
         }
         switcher?.let { s -> AppSwitcher(vm, s) }
+        if (drawerOpen) {
+            AppDrawer(
+                vm = vm, apps = state.drawer, target = focusTarget, tick = focusTick,
+                enabled = menuFor == null, onMenu = { menuFor = it },
+            )
+        }
 
         menuFor?.let { app ->
             val isFav = state.favorites.any { it.pkg == app.pkg }
+            val inDrawer = state.drawer.any { it.pkg == app.pkg }
             ContextMenu(
                 app = app,
                 actions = buildList<Pair<String, () -> Unit>> {
-                    if (app.pkg != SETTINGS_ID) {
+                    if (inDrawer) {
+                        if (app.pkg != SETTINGS_ID) add("Auf Home anzeigen" to { vm.showOnHome(app.pkg) })
+                        add("Öffnen" to { launch(context, app) })
+                        if (app.pkg != SETTINGS_ID && !app.pkg.startsWith(INPUT_PREFIX)) {
+                            add("Deinstallieren" to { uninstall(context, app.pkg) })
+                            add("App-Info" to { openAppInfo(context, app.pkg) })
+                        }
+                    } else if (app.pkg != SETTINGS_ID) {
                         add("Bewegen" to { vm.startEdit(app.pkg) })
                         add((if (isFav) "Aus oberer Reihe entfernen" else "In obere Reihe") to { vm.toggleFavorite(app.pkg) })
-                        add("Ausblenden" to { vm.hide(app.pkg) })
+                        add("In „Weitere Apps“" to { vm.hide(app.pkg) })
                         if (!app.pkg.startsWith(INPUT_PREFIX)) {
                             add("Deinstallieren" to { uninstall(context, app.pkg) })
                             add("App-Info" to { openAppInfo(context, app.pkg) })
@@ -229,6 +247,51 @@ fun HomeScreen(vm: HomeViewModel) {
     }
 }
 
+/** "Weitere Apps": everything kept off the home screen. Yellow key or Control Center; Back closes. */
+@Composable
+private fun AppDrawer(
+    vm: HomeViewModel,
+    apps: List<AppEntry>,
+    target: String?,
+    tick: Int,
+    enabled: Boolean,
+    onMenu: (AppEntry) -> Unit,
+) {
+    BackHandler { vm.closeDrawer() }
+    val first = apps.firstOrNull()?.pkg
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Color(0xF00D0F14))
+    ) {
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(COLUMNS),
+            contentPadding = PaddingValues(start = SidePadding, end = SidePadding, top = 96.dp, bottom = 60.dp),
+            horizontalArrangement = Arrangement.spacedBy(TileGap),
+            verticalArrangement = Arrangement.spacedBy(18.dp),
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            items(apps, key = { it.pkg }) { app ->
+                TileWithFocus(
+                    app = app, target = target, tick = tick, enabled = enabled,
+                    editing = false, vm = vm, row = DRAWER_ROW,
+                    onMenu = { onMenu(app) },
+                    autoFocus = app.pkg == first,
+                )
+            }
+        }
+        Column(Modifier.padding(start = 56.dp, top = 34.dp)) {
+            Txt("Weitere Apps", size = 30.sp, weight = FontWeight.ExtraBold, letterSpacing = (-0.5).sp)
+            Txt("MENU: auf Home anzeigen  ·  Zurück: schließen", size = 12.sp, color = Color.White.copy(alpha = 0.55f))
+        }
+        if (apps.isEmpty()) {
+            Txt("Keine weiteren Apps", size = 18.sp, color = Color.White.copy(alpha = 0.7f), modifier = Modifier.align(Alignment.Center))
+        }
+    }
+}
+
+private const val DRAWER_ROW = -100
+
 @Composable
 private fun TileWithFocus(
     app: AppEntry,
@@ -240,6 +303,7 @@ private fun TileWithFocus(
     row: Int,
     onMenu: () -> Unit,
     onUp: (() -> Boolean)? = null,
+    autoFocus: Boolean = false,
 ) {
     val context = LocalContext.current
     val requester = remember { FocusRequester() }
@@ -249,14 +313,21 @@ private fun TileWithFocus(
             runCatching { requester.requestFocus() }
         }
     }
+    LaunchedEffect(Unit) {
+        if (autoFocus && enabled) {
+            delay(60)
+            runCatching { requester.requestFocus() }
+        }
+    }
+    val inDrawer = row == DRAWER_ROW
     AppTile(
         app = app,
         focusRequester = requester,
         enabled = enabled,
         editing = editing,
-        onFocused = { vm.onFocus(app, row) },
-        onOpen = { launch(context, app) },
-        onLongPress = { vm.startEdit(app.pkg) },
+        onFocused = { if (!inDrawer) vm.onFocus(app, row) },
+        onOpen = { if (inDrawer) vm.closeDrawer(); launch(context, app) },
+        onLongPress = { if (inDrawer) onMenu() else vm.startEdit(app.pkg) },
         onMenu = onMenu,
         onEditMove = { dir -> vm.editMove(app.pkg, dir) },
         onEditDone = { vm.endEdit() },
