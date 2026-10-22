@@ -196,14 +196,15 @@ fun AppTile(
         }
         Text(
             text = app.label,
-            color = Color.White.copy(alpha = labelAlpha),
+            color = Color.White,
             fontSize = 12.sp,
             fontWeight = FontWeight.Medium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
             style = TextStyle(shadow = Shadow(Color.Black.copy(alpha = 0.6f), Offset(0f, 1.5f), 6f)),
-            modifier = Modifier.height(TileLabelHeight).padding(top = 12.dp),
+            // fade with a layer, so the text shadow fades too (no blurry 'ghost' labels)
+            modifier = Modifier.height(TileLabelHeight).padding(top = 12.dp).graphicsLayer { alpha = labelAlpha },
         )
     }
 }

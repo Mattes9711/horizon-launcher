@@ -61,6 +61,18 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     private val _wallpaper = MutableStateFlow<ImageBitmap?>(null)
     val wallpaper: StateFlow<ImageBitmap?> = _wallpaper.asStateFlow()
 
+    private val _controlCenter = MutableStateFlow(false)
+    val controlCenter: StateFlow<Boolean> = _controlCenter.asStateFlow()
+
+    fun toggleControlCenter() {
+        _controlCenter.value = !_controlCenter.value
+        if (!_controlCenter.value) _restoreTick.value++
+    }
+
+    fun closeControlCenter() {
+        if (_controlCenter.value) toggleControlCenter()
+    }
+
     private val _immersive = MutableStateFlow(false)
     val immersive: StateFlow<Boolean> = _immersive.asStateFlow()
 
@@ -83,7 +95,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             topRowApp.collectLatest { app ->
                 if (app == null) return@collectLatest
-                delay(120) // don't swap artwork while the user scrolls fast
+                delay(70) // don't swap artwork while the user scrolls fast
                 val image = withContext(Dispatchers.IO) { userHero(app.pkg) }
                 _hero.value = Hero(app.pkg, app.label, image, app.accent)
             }
@@ -127,6 +139,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
     fun goHome() {
         _immersive.value = false
+        _controlCenter.value = false
         lastFocusedPkg = null
         _homeTick.value++
     }

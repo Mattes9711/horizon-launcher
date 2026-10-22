@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.Bundle
+import android.util.Log
 import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -57,7 +58,16 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (event.action == KeyEvent.ACTION_DOWN) Motion.record(event.keyCode)
+        if (event.action == KeyEvent.ACTION_DOWN) {
+            Motion.record(event.keyCode)
+            // which keys does the remote send? visible with: adb logcat -s SmartTV
+            Log.d(HomeViewModel.TAG, "key ${KeyEvent.keyCodeToString(event.keyCode)} repeat=${event.repeatCount}")
+        }
+        // blue key opens / closes the Control Center
+        if (event.keyCode == KeyEvent.KEYCODE_PROG_BLUE) {
+            if (event.action == KeyEvent.ACTION_UP) vm.toggleControlCenter()
+            return true
+        }
         return super.dispatchKeyEvent(event)
     }
 

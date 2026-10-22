@@ -97,6 +97,7 @@ fun HomeScreen(vm: HomeViewModel) {
     val focusRow by vm.focusRow.collectAsStateWithLifecycle()
     val homeTick by vm.homeTick.collectAsStateWithLifecycle()
     val restoreTick by vm.restoreTick.collectAsStateWithLifecycle()
+    val controlCenter by vm.controlCenter.collectAsStateWithLifecycle()
 
     var menuFor by remember { mutableStateOf<AppEntry?>(null) }
     // focus requests: (package, counter) - every tile checks if it is the target
@@ -107,7 +108,7 @@ fun HomeScreen(vm: HomeViewModel) {
         focusTick++
     }
 
-    val tilesEnabled = !immersive && menuFor == null
+    val tilesEnabled = !immersive && menuFor == null && !controlCenter
     val atTop = focusRow == DOCK_ROW
     val heroSpace = LocalConfiguration.current.screenHeightDp.dp - DockHeight - RowPeek
 
@@ -121,7 +122,7 @@ fun HomeScreen(vm: HomeViewModel) {
                 else -> (heroSpace - GridTop + RowHeight * (focusRow - 1)).toPx()
             }
         }
-        scroll.animateTo(target, spring(dampingRatio = 0.86f, stiffness = 260f))
+        scroll.animateTo(target, spring(dampingRatio = 1f, stiffness = 650f))
     }
 
     // first load and every Home press: back to the first favourite
@@ -200,6 +201,10 @@ fun HomeScreen(vm: HomeViewModel) {
             )
         }
 
+        if (controlCenter) {
+            ControlCenter(onClose = { vm.closeControlCenter() })
+        }
+
         menuFor?.let { app ->
             val isFav = state.favorites.any { it.pkg == app.pkg }
             val list = if (isFav) state.favorites else state.others
@@ -275,13 +280,18 @@ private fun WallpaperLayer(vm: HomeViewModel) {
     if (image != null) {
         Image(image, null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
     } else {
-        Canvas(Modifier.fillMaxSize()) {
-            drawRect(Color(0xFFE3E9F0))
-            blob(0.18f, 0.22f, 0.75f, Color(0xFFB5D2EE))
-            blob(0.88f, 0.18f, 0.55f, Color(0xFFF2E1C9))
-            blob(0.62f, 0.95f, 0.65f, Color(0xFFCFDDEB))
-            blob(0.05f, 0.95f, 0.45f, Color(0xFFEDE3D6))
+        val pastel = remember {
+            Art.render(
+                0xFFE3E9F0.toInt(),
+                listOf(
+                    Art.Blob(0.18f, 0.22f, 0.75f, 0xFFB5D2EE.toInt()),
+                    Art.Blob(0.88f, 0.18f, 0.55f, 0xFFF2E1C9.toInt()),
+                    Art.Blob(0.62f, 0.95f, 0.65f, 0xFFCFDDEB.toInt()),
+                    Art.Blob(0.05f, 0.95f, 0.45f, 0xFFEDE3D6.toInt()),
+                ),
+            )
         }
+        Image(pastel, null, contentScale = ContentScale.FillBounds, modifier = Modifier.fillMaxSize())
     }
     // keep white labels readable on the light wallpaper
     Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.10f)))
@@ -291,10 +301,10 @@ private fun WallpaperLayer(vm: HomeViewModel) {
 @Composable
 private fun HeroLayer(vm: HomeViewModel, visible: Boolean) {
     val hero by vm.hero.collectAsStateWithLifecycle()
-    val alpha by animateFloatAsState(if (visible) 1f else 0f, tween(450), label = "heroAlpha")
+    val alpha by animateFloatAsState(if (visible) 1f else 0f, tween(260), label = "heroAlpha")
     if (alpha == 0f) return
     Box(Modifier.fillMaxSize().graphicsLayer { this.alpha = alpha }) {
-        Crossfade(targetState = hero, animationSpec = tween(600), label = "hero") { h ->
+        Crossfade(targetState = hero, animationSpec = tween(320), label = "hero") { h ->
             Box(Modifier.fillMaxSize()) {
                 val image = h?.image
                 if (image != null) {
@@ -332,13 +342,19 @@ private fun HeroLayer(vm: HomeViewModel, visible: Boolean) {
 /** Original soft "aurora" artwork in the app's own colours (used until real content art exists). */
 @Composable
 private fun GeneratedArt(accent: Color) {
-    val palette = remember(accent) { auroraPalette(accent) }
-    Canvas(Modifier.fillMaxSize()) {
-        drawRect(palette[0])
-        blob(0.22f, 0.30f, 0.80f, palette[1])
-        blob(0.85f, 0.15f, 0.60f, palette[2])
-        blob(0.70f, 0.85f, 0.70f, palette[3])
+    // rendered once per colour into a small bitmap; smooth gradients upscale cleanly and cost the GPU almost nothing
+    val art = remember(accent) {
+        val p = auroraPalette(accent).map { it.toArgb() }
+        Art.render(
+            p[0],
+            listOf(
+                Art.Blob(0.22f, 0.30f, 0.80f, p[1]),
+                Art.Blob(0.85f, 0.15f, 0.60f, p[2]),
+                Art.Blob(0.70f, 0.85f, 0.70f, p[3]),
+            ),
+        )
     }
+    Image(art, null, contentScale = ContentScale.FillBounds, modifier = Modifier.fillMaxSize())
 }
 
 private fun auroraPalette(accent: Color): List<Color> {
